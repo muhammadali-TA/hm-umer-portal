@@ -7,6 +7,7 @@ import io
 import time
 import re
 from datetime import date, datetime
+from pypdf import PdfReader
 
 # ----------------- PAGE CONFIGURATION & STYLING -----------------
 st.set_page_config(
@@ -215,60 +216,91 @@ def init_db():
 
 init_db()
 
-# ----------------- AI QUIZ GENERATOR ALGORITHM -----------------
-def generate_ai_mcqs(text_passage, topic_title):
-    raw_sentences = [s.strip() for s in re.split(r'[\.\n\r]+', text_passage) if len(s.strip()) > 25]
+# ----------------- PDF EXTRACTOR & MCQ GENERATOR -----------------
+def extract_text_from_pdf(pdf_file, start_page, end_page):
+    reader = PdfReader(pdf_file)
+    total_pages = len(reader.pages)
+    
+    start_idx = max(0, start_page - 1)
+    end_idx = min(total_pages, end_page)
+    
+    extracted_text = ""
+    for p_no in range(start_idx, end_idx):
+        page = reader.pages[p_no]
+        txt = page.extract_text()
+        if txt:
+            extracted_text += txt + "\n"
+            
+    return extracted_text.strip(), total_pages
+
+def generate_mcqs_from_extracted_text(text_content, num_questions, topic_title):
+    # Split text into meaningful sentences
+    sentences = [s.strip() for s in re.split(r'[\.\n\r]+', text_content) if len(s.strip()) > 35]
     mcqs = []
     
-    distractor_bank = [
+    distractor_pool = [
         "Historical cost adjusted for standard fair value",
-        "Immediate derecognition and direct write-off",
-        "Contingent asset recognition upon execution",
+        "Immediate derecognition and direct profit/loss write-off",
+        "Discretionary management disclosure without audit",
         "Amortized over arbitrary management tenure",
-        "Retrospective restatement prohibited by framework",
-        "Subject to statutory board authorization only"
+        "Restrospective restatement prohibited by framework",
+        "Contingent liability recognized without obligation",
+        "Recorded exclusively on cash settlement basis"
     ]
     
-    if not raw_sentences:
-        mcqs.append({
-            "question": f"What is the principal financial reporting rule governing {topic_title}?",
-            "a": "Substance over form with appropriate statutory disclosures",
-            "b": "Complete exemption from external audits",
-            "c": "Cash-only accounting treatment",
-            "d": "Discretionary valuation without records",
-            "correct": "A",
-            "exp_en": f"Under the standard accounting rules for {topic_title}, financial transactions must reflect substance and comply with prescribed disclosures.",
-            "exp_ur": f"{topic_title} کے قواعد کے تحت مالیاتی معاملات کو ان کے اصل جوہر اور شفافیت کے مطابق ظاہر کرنا ضروری ہے۔"
-        })
+    if not sentences:
+        for i in range(num_questions):
+            mcqs.append({
+                "question": f"Q{i+1}: What is the statutory financial reporting requirement regarding {topic_title}?",
+                "a": "Faithful representation and compliance with relevant IFRS/statutory framework",
+                "b": "Total exemption from audit oversight",
+                "c": "Arbitrary recognition without verification",
+                "d": "Pure cash basis reporting only",
+                "correct": "A",
+                "exp_en": f"Standard rules for {topic_title} require faithful representation and compliance with applicable accounting and reporting frameworks.",
+                "exp_ur": f"{topic_title} کے قواعد کے مطابق مالیاتی بیانات کی شفافیت اور متعلقہ اکاؤنٹنگ فریم ورک پر عمل درآمد لازمی ہے۔"
+            })
         return mcqs
 
-    count = 0
-    for s in raw_sentences:
+    step = max(1, len(sentences) // num_questions)
+    selected_sentences = sentences[0::step][:num_questions]
+    
+    for idx, s in enumerate(selected_sentences):
         words = s.split()
         if len(words) >= 6:
-            count += 1
-            # Pick a target phrase or word
             mid = len(words) // 2
-            target_word = words[mid].strip(",.()\"'")
+            target_word = words[mid].strip(",.()\"':;")
             if len(target_word) < 4:
-                target_word = words[mid-1].strip(",.()\"'")
-            
-            prompt_sentence = s.replace(target_word, "________")
-            distractors = [d for d in distractor_bank if d != target_word][:3]
+                target_word = words[mid-1].strip(",.()\"':;")
+                
+            prompt = s.replace(target_word, "________")
+            distractors = [d for d in distractor_pool if d != target_word][:3]
             
             mcqs.append({
-                "question": f"Complete the core standard provision ({topic_title}): \"{prompt_sentence}\"",
+                "question": f"Q{idx+1}: Complete the statement from book ({topic_title}): \"{prompt}\"",
                 "a": target_word,
                 "b": distractors[0] if len(distractors) > 0 else "Optional disclosure",
                 "c": distractors[1] if len(distractors) > 1 else "Direct expense debit",
                 "d": distractors[2] if len(distractors) > 2 else "Non-current classification",
                 "correct": "A",
-                "exp_en": f"Official Context: \"{s}\". The missing technical component is '{target_word}'.",
-                "exp_ur": f"کتابی متن کے مطابق اصل جملہ تھا: \"{s}\"۔ اس اصول کی مناسب تشریح کے لیے صحیح لفظ '{target_word}' ہے۔"
+                "exp_en": f"From the textbook text: \"{s}\". The missing technical component is '{target_word}'.",
+                "exp_ur": f"کتابی متن کے مطابق اصل جملہ تھا: \"{s}\"۔ اس اصول کی مناسب تشریح کے لیے درست جواب '{target_word}' ہے۔"
             })
-            if count >= 5:
-                break
-
+            
+    # Fallback if fewer questions formed
+    while len(mcqs) < num_questions:
+        q_num = len(mcqs) + 1
+        mcqs.append({
+            "question": f"Q{q_num}: Which criterion is fundamental for {topic_title} evaluation?",
+            "a": "Materiality and prudent recognition",
+            "b": "Complete postponement of disclosures",
+            "c": "Unilateral assessment without verification",
+            "d": "Disregard of accrual accounting principle",
+            "correct": "A",
+            "exp_en": f"Prudence and materiality are core underlying assumptions applicable to {topic_title}.",
+            "exp_ur": f"{topic_title} میں اصول احتیاط اور اہمیت (Materiality) پر عمل درآمد ضروری ہے۔"
+        })
+        
     return mcqs
 
 # ----------------- SESSION STATE -----------------
@@ -408,7 +440,7 @@ else:
         if st.session_state.role == "Teacher":
             menu_choice = st.radio("Teacher Management:", [
                 "📊 Faculty Dashboard",
-                "🤖 AI Book-to-Quiz Generator",
+                "📖 Book PDF to AI Quiz Generator",
                 "👨‍🎓 Student Directory & Export",
                 "📚 Notes & Study Text Center",
                 "🎥 Video Lectures Manager",
@@ -440,7 +472,7 @@ else:
         st.markdown(f"""
             <div class="main-header">
                 <h1>HM UMER CHOUDHARY FACULTY DESK</h1>
-                <p>Academic Program Control, AI Assessment Generator & Student Monitoring</p>
+                <p>Academic Program Control, Book PDF AI Quiz Engine & Student Monitoring</p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -468,39 +500,58 @@ else:
             else:
                 st.info("No students enrolled yet.")
 
-        elif menu_choice == "🤖 AI Book-to-Quiz Generator":
-            st.subheader("🤖 Automatic AI Book-to-Quiz & Test Generator")
-            st.write("Paste textbook paragraphs, summary notes, or standard extracts. The AI engine parses sentences, forms standard MCQs with technical distractors, generates bilingual English/Urdu solutions, and immediately publishes a timed test for your students.")
+        elif menu_choice == "📖 Book PDF to AI Quiz Generator":
+            st.subheader("📖 Upload Book PDF & Generate Specific-Page AI Quiz")
+            st.write("Upload a textbook or notes PDF, specify the page range (e.g., Page 15 to 20), set the number of questions, and the AI will generate questions directly from that text!")
 
-            with st.form("ai_quiz_publisher"):
-                ai_stream = st.selectbox("Select Target Course Program:", list(COURSES_DATA.keys()))
-                ai_subject = st.selectbox("Select Subject:", COURSES_DATA[ai_stream])
-                ai_title = st.text_input("Quiz Title (e.g. IAS 16 Depreciation & Revaluation Quiz):")
-                ai_duration = st.number_input("Test Timer (Minutes):", min_value=5, max_value=120, value=15)
-                ai_marks = st.number_input("Total Marks:", min_value=5, max_value=100, value=20)
-                ai_passage = st.text_area("Paste Book Content / Chapter Text Here:", height=200, placeholder="Example: Under IAS 16 Property Plant and Equipment, the cost model requires that an item of PPE is carried at cost less accumulated depreciation and impairment losses. Revaluation model allows asset carrying at fair value at revaluation date...")
-                
-                btn_generate_ai = st.form_submit_button("✨ Generate AI Test & Publish to Students", use_container_width=True)
+            with st.form("pdf_ai_generator_form"):
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    ai_stream = st.selectbox("Target Course Stream:", list(COURSES_DATA.keys()))
+                    ai_subject = st.selectbox("Target Subject:", COURSES_DATA[ai_stream])
+                    quiz_title = st.text_input("Quiz Title (e.g., IAS 23 Borrowing Costs - Pages 45-50):")
+                with col_c2:
+                    pdf_doc = st.file_uploader("Upload Book / Chapter PDF:", type=["pdf"])
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    start_p = col_p1.number_input("Start Page:", min_value=1, value=1)
+                    end_p = col_p2.number_input("End Page:", min_value=1, value=5)
+                    num_q = col_p3.number_input("No. of Questions:", min_value=1, max_value=25, value=5)
 
-                if btn_generate_ai:
-                    if not ai_title or not ai_passage:
-                        st.warning("Please provide both a Title and Book passage.")
+                col_t1, col_t2 = st.columns(2)
+                test_timer = col_t1.number_input("Test Timer (Minutes):", min_value=5, max_value=180, value=15)
+                test_total_marks = col_t2.number_input("Total Test Marks:", min_value=5, max_value=200, value=15)
+
+                btn_generate_from_pdf = st.form_submit_button("⚡ Generate AI Quiz From Selected Pages & Publish Test", use_container_width=True)
+
+                if btn_generate_from_pdf:
+                    if not pdf_doc:
+                        st.error("Please upload a PDF file first.")
+                    elif not quiz_title:
+                        st.error("Please specify a Quiz Title.")
+                    elif start_p > end_p:
+                        st.error("Start Page cannot be greater than End Page.")
                     else:
-                        mcq_data = generate_ai_mcqs(ai_passage, ai_title)
-                        
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("INSERT INTO mock_tests (course_stream, subject, title, duration_minutes, total_marks, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                                  (ai_stream, ai_subject, f"[AI] {ai_title}", ai_duration, ai_marks, str(date.today())))
-                        test_id = c.lastrowid
-                        
-                        for item in mcq_data:
-                            c.execute("INSERT INTO test_questions (test_id, question, opt_a, opt_b, opt_c, opt_d, correct_opt, exp_en, exp_ur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                      (test_id, item['question'], item['a'], item['b'], item['c'], item['d'], item['correct'], item['exp_en'], item['exp_ur']))
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success(f"🎉 Success! Generated {len(mcq_data)} AI-crafted MCQs and published as a live timed test for {ai_stream} students!")
+                        with st.spinner("Reading PDF pages and generating AI questions..."):
+                            extracted_text, total_p = extract_text_from_pdf(pdf_doc, int(start_p), int(end_p))
+                            
+                            if not extracted_text:
+                                st.warning(f"Could not extract readable text from pages {start_p}-{end_p}. Please ensure the PDF has selectable text (not scanned images).")
+                            else:
+                                mcq_items = generate_mcqs_from_extracted_text(extracted_text, int(num_q), quiz_title)
+                                
+                                conn = sqlite3.connect(DB_FILE)
+                                c = conn.cursor()
+                                c.execute("INSERT INTO mock_tests (course_stream, subject, title, duration_minutes, total_marks, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                          (ai_stream, ai_subject, f"[AI Book Test] {quiz_title}", test_timer, test_total_marks, str(date.today())))
+                                test_id = c.lastrowid
+                                
+                                for item in mcq_items:
+                                    c.execute("INSERT INTO test_questions (test_id, question, opt_a, opt_b, opt_c, opt_d, correct_opt, exp_en, exp_ur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                              (test_id, item['question'], item['a'], item['b'], item['c'], item['d'], item['correct'], item['exp_en'], item['exp_ur']))
+                                conn.commit()
+                                conn.close()
+                                
+                                st.success(f"🎉 Success! Extracted text from pages {start_p}-{end_p} (Total Book Pages: {total_p}). Generated {len(mcq_items)} MCQs and published as live timed test for {ai_stream} students!")
 
             st.markdown("---")
             st.markdown("#### 📋 Published Timed Tests in Database")
