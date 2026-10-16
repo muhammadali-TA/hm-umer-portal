@@ -7,6 +7,7 @@ import io
 import time
 import uuid
 import re
+import random
 from datetime import date, datetime
 from pypdf import PdfReader
 
@@ -25,10 +26,10 @@ st.markdown("""
     .status-banner {
         background: linear-gradient(135deg, #1E3A8A 0%, #0F172A 100%);
         color: white;
-        padding: 16px 20px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        padding: 18px 24px;
+        border-radius: 10px;
+        margin-bottom: 22px;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
     }
     .status-banner h2 {
         margin: 0;
@@ -36,9 +37,9 @@ st.markdown("""
         color: #F8FAFC;
     }
     .status-banner p {
-        margin: 5px 0 0 0;
+        margin: 6px 0 0 0;
         color: #93C5FD;
-        font-size: 0.95rem;
+        font-size: 1rem;
     }
     .metric-card {
         background: #FFFFFF;
@@ -59,9 +60,17 @@ st.markdown("""
         font-size: 0.85rem;
         font-weight: 600;
     }
-    .solution-box {
+    .review-card {
         background-color: #F8FAFC;
-        border-left: 4px solid #2563EB;
+        border: 1px solid #CBD5E1;
+        border-left: 5px solid #2563EB;
+        padding: 16px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+    }
+    .solution-box {
+        background-color: #F1F5F9;
+        border-left: 4px solid #10B981;
         padding: 12px 16px;
         border-radius: 6px;
         margin: 10px 0;
@@ -78,7 +87,6 @@ DB_FILE = "hm_umer_portal.db"
 UPLOAD_DIR = "academy_content"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Exact Subjects from handwritten spec
 COURSES = [
     "PRC-1 Fundamental of Accounting",
     "CAF-1 Financial Accounting & Reporting 1",
@@ -115,6 +123,7 @@ def init_db():
         title TEXT,
         duration_minutes INTEGER,
         total_marks INTEGER,
+        status TEXT, -- 'DRAFT' or 'PUBLISHED'
         created_at TEXT
     )''')
     
@@ -150,103 +159,216 @@ def init_db():
         created_at TEXT
     )''')
     
-    c.execute('''CREATE TABLE IF NOT EXISTS announcements (
+    c.execute('''CREATE TABLE IF NOT EXISTS daily_status (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         message TEXT,
+        video_url TEXT,
+        video_file_path TEXT,
         updated_at TEXT
     )''')
     
-    # Default Teacher Account
     c.execute("SELECT * FROM users WHERE username = 'admin'")
     if not c.fetchone():
         c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
                   ("admin", hash_password("admin123"), "HM Umer Choudhary", "Teacher", "All", ""))
         
-    c.execute("SELECT * FROM announcements")
+    c.execute("SELECT * FROM daily_status")
     if not c.fetchone():
-        c.execute("INSERT INTO announcements (message, updated_at) VALUES (?, ?)",
-                  ("Welcome to HM UMER Ch. Portal. Tests and lectures updated daily.", str(date.today())))
+        c.execute("INSERT INTO daily_status (message, video_url, video_file_path, updated_at) VALUES (?, ?, ?, ?)",
+                  ("Welcome to HM Umer Choudhary Portal! Check your course tab for today's tests and notes.", "", "", str(date.today())))
         
     conn.commit()
     conn.close()
 
 init_db()
 
-# ----------------- AI QUIZ GENERATOR HELPER -----------------
-def extract_pdf_pages(pdf_file, start_p, end_p):
-    reader = PdfReader(pdf_file)
-    total_len = len(reader.pages)
-    s_idx = max(0, start_p - 1)
-    e_idx = min(total_len, end_p)
-    text = ""
-    for idx in range(s_idx, e_idx):
-        extracted = reader.pages[idx].extract_text()
-        if extracted:
-            text += extracted + "\n"
-    return text.strip(), total_len
+# ----------------- ROBUST PDF & HIGH-VOLUME AI GENERATOR -----------------
+def extract_pdf_pages_safe(pdf_file, start_p, end_p):
+    try:
+        reader = PdfReader(pdf_file)
+        total_len = len(reader.pages)
+        if total_len == 0:
+            return "", 0
+        s_idx = max(0, start_p - 1)
+        e_idx = min(total_len, end_p)
+        text = ""
+        for idx in range(s_idx, e_idx):
+            try:
+                page_text = reader.pages[idx].extract_text()
+                if page_text:
+                    text += page_text + "\n"
+            except Exception:
+                continue
+        return text.strip(), total_len
+    except Exception as e:
+        return "", 0
 
-def generate_ai_mcqs(text_passage, num_q, topic):
-    sentences = [s.strip() for s in re.split(r'[\.\n\r]+', text_passage) if len(s.strip()) > 35]
-    mcqs = []
-    distractors = [
-        "Direct charge to retained earnings",
-        "Fair value through profit and loss valuation",
-        "Discretionary adjustment at balance sheet date",
-        "Deferred realization method over contract period",
-        "Historical cost without subsequent impairment"
-    ]
-    
-    if not sentences:
-        for i in range(num_q):
-            mcqs.append({
-                "q": f"Q{i+1}: What is the fundamental compliance rule for {topic}?",
-                "a": "Faithful representation in accordance with applicable framework",
-                "b": "Discretionary recognition without documentation",
-                "c": "Cash-basis realization only",
-                "d": "Complete write-off upon purchase",
-                "correct": "A",
-                "exp_en": f"Under IAS/IFRS and statutory standards for {topic}, transactions must ensure faithful representation.",
-                "exp_ur": f"{topic} کے اصولوں کے تحت تمام لین دین کی شفاف اور درست فریم ورک کے تحت نمائندگی لازمی ہے۔"
-            })
-        return mcqs
+ACCOUNTING_QUESTION_BANK = [
+    {
+        "q": "Under the accrual basis of accounting, when should revenue and expenses be recognized?",
+        "correct": "When earned or incurred, regardless of when cash is received or paid",
+        "distractors": [
+            "Strictly when physical currency is deposited into the bank account",
+            "At the end of the statutory financial year during external audit",
+            "Only upon written confirmation and approval from the tax authorities"
+        ],
+        "exp_en": "Accrual concept mandates recording transactions in the financial period in which they occur, not when cash moves.",
+        "exp_ur": "اکروئل کی رو سے آمدن اور اخراجات اسی مدت میں ریکارڈ ہوتے ہیں جب وہ پیدا ہوں، چاہے نقد ادائیگی ہوئی ہو یا نہ ہوئی ہو۔"
+    },
+    {
+        "q": "Which of the following expenditures must be capitalized as part of Property, Plant and Equipment (IAS 16)?",
+        "correct": "Direct site preparation, delivery, and professional installation costs",
+        "distractors": [
+            "Routine annual repair, scheduled servicing, and maintenance costs",
+            "General administrative and indirect corporate marketing expenses",
+            "Staff training expenses for standard product operation"
+        ],
+        "exp_en": "Direct costs required to bring the asset to its working condition for intended use are capitalized under IAS 16.",
+        "exp_ur": "اثاثے کو استعمال کے قابل حالت میں لانے کے لیے اٹھنے والے براہ راست اخراجات کیپٹلائز کیے جاتے ہیں۔"
+    },
+    {
+        "q": "How should inventory be valued at the reporting date according to standard accounting principles?",
+        "correct": "Lower of historical cost and net realizable value (NRV)",
+        "distractors": [
+            "Highest expected sales price over the subsequent financial quarter",
+            "At current replacement cost irrespective of market realizable amount",
+            "At discounted present value calculated using management internal rate"
+        ],
+        "exp_en": "Prudence concept and IAS 2 dictate measuring inventory at the lower of cost and net realizable value.",
+        "exp_ur": "اصول احتیاط کے تحت انوینٹری کو قیمت خرید (Cost) اور خالص قابل وصول قیمت (NRV) میں سے کم تر رقم پر ظاہر کیا جاتا ہے۔"
+    },
+    {
+        "q": "What is the accounting treatment for Borrowing Costs directly attributable to a qualifying asset (IAS 23)?",
+        "correct": "Must be capitalized as part of the asset cost during active development",
+        "distractors": [
+            "Immediately recognized in full as a finance cost expense in P&L",
+            "Deferred indefinitely under owners equity without amortization",
+            "Adjusted directly against share premium reserve upon settlement"
+        ],
+        "exp_en": "IAS 23 requires borrowing costs directly attributable to qualifying assets to be included in asset carrying value.",
+        "exp_ur": "کوالیفائنگ اثاثے کی تعمیر کے دوران اٹھنے والے قرض کے سود کو براہ راست اثاثے کی لاگت میں شامل کیا جاتا ہے۔"
+    },
+    {
+        "q": "When is a provision recognized under standard provisions and contingencies principles (IAS 37)?",
+        "correct": "Present obligation from past event, probable outflow, and reliable estimate",
+        "distractors": [
+            "Future intention of management to execute strategic corporate overhaul",
+            "Possible obligation dependent entirely on uncertain future events",
+            "Solely when formal court judgment is executed and sealed"
+        ],
+        "exp_en": "A provision requires a present legal/constructive obligation, probable outflow (>50%), and reliable estimation.",
+        "exp_ur": "ماضی کے واقعے کی وجہ سے موجودہ ذمہ داری، رقم کا جانا یقینی ہونا اور درست اندازہ ممکن ہونا پروویژن کی بنیاد ہیں۔"
+    },
+    {
+        "q": "Under the revaluation model (IAS 16), where is an initial revaluation surplus recognized?",
+        "correct": "In Other Comprehensive Income (OCI) and accumulated in equity",
+        "distractors": [
+            "Directly as operating profit within the Profit and Loss statement",
+            "As deferred liability payable to government regulatory agencies",
+            "Subtracted immediately from accumulated historical depreciation"
+        ],
+        "exp_en": "Revaluation gains not reversing a previous deficit are recognized in OCI and credited to revaluation surplus in equity.",
+        "exp_ur": "اثاثے کی دوبارہ قیمت لگانے پر ہونے والا اضافہ براہ راست ایکویٹی میں Revaluation Surplus کے نام سے جمع ہوتا ہے۔"
+    },
+    {
+        "q": "In bank reconciliation, how are unpresented cheques treated on the cash book balance to reach bank balance?",
+        "correct": "Deducted from the balance per bank statement (or added back to cash book)",
+        "distractors": [
+            "Written off as bad debt loss in the trial balance directly",
+            "Doubled and reported under contingent obligations",
+            "Ignored because the bank records have ultimate accounting authority"
+        ],
+        "exp_en": "Unpresented cheques have been credited in cash book but not yet cleared/debited by the bank.",
+        "exp_ur": "جاری کیے گئے وہ چیکس جو بینک میں پیش نہ ہوئے ہوں، بینک سٹیٹمنٹ سے منہا کر کے تقابل کیا جاتا ہے۔"
+    },
+    {
+        "q": "What is the primary qualitative characteristic that financial reports must possess?",
+        "correct": "Relevance and Faithful Representation",
+        "distractors": [
+            "Maximum reported profitability and conservative dividend pay-out",
+            "Unrestricted management discretion over valuation methodologies",
+            "Complex format exclusively understandable by chartered accountants"
+        ],
+        "exp_en": "The Conceptual Framework establishes Relevance and Faithful Representation as the fundamental characteristics.",
+        "exp_ur": "مالیاتی معلومات کا بر وقت اور بامقصد ہونا (Relevance) اور حقیقت پر مبنی ہونا سب سے اہم خصوصیت ہے۔"
+    }
+]
 
-    step = max(1, len(sentences) // num_q)
-    sample = sentences[0::step][:num_q]
+def generate_high_volume_quiz(extracted_text, num_q, topic_title):
+    questions_out = []
+    text_sentences = []
     
-    for idx, s in enumerate(sample):
+    if extracted_text and len(extracted_text) > 50:
+        cleaned = re.sub(r'\s+', ' ', extracted_text)
+        text_sentences = [s.strip() for s in re.split(r'[\.\n\r]+', cleaned) if 35 < len(s.strip()) < 220]
+
+    # 1. Generate from actual book text if available
+    used_sentences = set()
+    for s in text_sentences:
+        if len(questions_out) >= num_q:
+            break
+        if s in used_sentences:
+            continue
         words = s.split()
-        if len(words) >= 6:
+        if len(words) >= 7:
+            used_sentences.add(s)
             mid = len(words) // 2
-            target = words[mid].strip(",.()\"';:")
-            if len(target) < 4:
-                target = words[mid - 1].strip(",.()\"';:")
-            prompt = s.replace(target, "_______")
-            dist = [d for d in distractors if d != target][:3]
+            target_token = words[mid].strip(",.()\"';:[]{}")
+            if len(target_token) < 4:
+                target_token = words[mid-1].strip(",.()\"';:[]{}")
             
-            mcqs.append({
-                "q": f"Q{idx+1} ({topic}): Complete the official statement: \"{prompt}\"",
-                "a": target,
-                "b": dist[0] if len(dist) > 0 else "Accrued cost liability",
-                "c": dist[1] if len(dist) > 1 else "Non-operating provision",
-                "d": dist[2] if len(dist) > 2 else "Unrealized capital gain",
-                "correct": "A",
-                "exp_en": f"Official Book Text: \"{s}\". The missing keyword is '{target}'.",
-                "exp_ur": f"کتابی متن کے مطابق اصل جملہ تھا: \"{s}\"۔ اس اصول کی درست وضاحت کے لیے درست لفظ '{target}' ہے۔"
-            })
+            if len(target_token) >= 3:
+                blanked = s.replace(target_token, "___________")
+                distractors = [
+                    "Direct charge to equity reserve without disclosure",
+                    "Immediate expensing in current operating cycle",
+                    "Deferred treatment pending audit verification",
+                    "Historical valuation without subsequent review"
+                ]
+                options = [target_token] + distractors[:3]
+                random.shuffle(options)
+                correct_letter = ["A", "B", "C", "D"][options.index(target_token)]
+                
+                questions_out.append({
+                    "q": f"Complete the provision from {topic_title}: \"{blanked}\"",
+                    "a": options[0],
+                    "b": options[1],
+                    "c": options[2],
+                    "d": options[3],
+                    "correct": correct_letter,
+                    "exp_en": f"Official Book Context: \"{s}\". The missing keyword is '{target_token}'.",
+                    "exp_ur": f"کتابی متن کے مطابق اصل حوالہ تھا: \"{s}\"۔ اس اصول کی درست تکمیل کے لیے درست جواب '{target_token}' ہے۔"
+                })
+
+    # 2. Complete remaining required questions from curated high-yield accounting bank
+    bank_cycle = list(ACCOUNTING_QUESTION_BANK)
+    random.shuffle(bank_cycle)
+    b_idx = 0
+
+    while len(questions_out) < num_q:
+        template = bank_cycle[b_idx % len(bank_cycle)]
+        b_idx += 1
+        
+        q_text = template["q"]
+        if b_idx > len(bank_cycle):
+            q_text = f"[{topic_title} Application {len(questions_out)+1}] " + template["q"]
             
-    while len(mcqs) < num_q:
-        i = len(mcqs) + 1
-        mcqs.append({
-            "q": f"Q{i}: How must transactions under {topic} be measured?",
-            "a": "In line with substance over form and relevant IFRS",
-            "b": "Arbitrary estimation by internal staff",
-            "c": "Postponed indefinitely without disclosure",
-            "d": "Only when approved by tax authority",
-            "correct": "A",
-            "exp_en": "Standard requires substance over form and adherence to relevant financial reporting standards.",
-            "exp_ur": "اکاؤنٹنگ کا بنیادی اصول ہے کہ لین دین کو ظاہری شکل کے بجائے ان کی اصل حقیقت کے مطابق لکھا جائے۔"
+        all_opts = [template["correct"]] + template["distractors"]
+        random.shuffle(all_opts)
+        c_letter = ["A", "B", "C", "D"][all_opts.index(template["correct"])]
+        
+        questions_out.append({
+            "q": q_text,
+            "a": all_opts[0],
+            "b": all_opts[1],
+            "c": all_opts[2],
+            "d": all_opts[3],
+            "correct": c_letter,
+            "exp_en": template["exp_en"],
+            "exp_ur": template["exp_ur"]
         })
-    return mcqs
+
+    return questions_out[:num_q]
 
 # ----------------- SESSION STATE -----------------
 if "logged_in" not in st.session_state:
@@ -264,23 +386,37 @@ if "test_active" not in st.session_state:
     st.session_state.test_submitted = False
     st.session_state.last_submission = {}
 
-# ----------------- ANNOUNCEMENT BANNER -----------------
+# ----------------- DYNAMIC BANNER WITH DAILY VIDEO/STATUS -----------------
 def render_header_banner():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT message FROM announcements ORDER BY id DESC LIMIT 1")
-    ann = c.fetchone()
+    c.execute("SELECT message, video_url, video_file_path, updated_at FROM daily_status ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
     conn.close()
-    msg = ann[0] if ann else "No current updates."
-    
+
+    msg = row[0] if row and row[0] else "Welcome to HM Umer Choudhary Learning Portal."
+    v_url = row[1] if row and row[1] else ""
+    v_path = row[2] if row and row[2] else ""
+    u_date = row[3] if row and row[3] else str(date.today())
+
     st.markdown(f"""
         <div class="status-banner">
-            <h2>HM UMER ch. Status / Announcement</h2>
-            <p>📢 {msg}</p>
+            <h2>HM UMER Ch. Status / Announcement</h2>
+            <p>📢 <strong>Update ({u_date}):</strong> {msg}</p>
         </div>
     """, unsafe_allow_html=True)
 
-# ----------------- AUTHENTICATION (NO DATA LEAK) -----------------
+    if v_path and os.path.exists(v_path):
+        st.markdown("##### 🎬 Daily Video Message from Sir HM Umer Choudhary:")
+        with open(v_path, "rb") as vf:
+            st.video(vf.read())
+        st.markdown("<br>", unsafe_allow_html=True)
+    elif v_url:
+        st.markdown("##### 🎬 Daily Video Message from Sir HM Umer Choudhary:")
+        st.video(v_url)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+# ----------------- AUTHENTICATION -----------------
 if not st.session_state.logged_in:
     render_header_banner()
     c1, c2, c3 = st.columns([1, 2, 1])
@@ -302,7 +438,6 @@ if not st.session_state.logged_in:
                     user = c.fetchone()
 
                     if user:
-                        # 1 Person 1 Device Security Token
                         new_device_token = str(uuid.uuid4())
                         c.execute("UPDATE users SET active_token = ? WHERE username = ?", (new_device_token, user[0]))
                         conn.commit()
@@ -347,215 +482,4 @@ if not st.session_state.logged_in:
                             st.error("This Roll No/CRN is already registered.")
                             conn.close()
                         else:
-                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                                      (s_crn, hash_password(s_pwd1), s_name, "Student", s_course, ""))
-                            conn.commit()
-                            conn.close()
-                            st.success("Registration complete! You can now Sign In.")
-
-        elif auth_action == "Teacher Sign Up":
-            st.markdown("### 👨‍🏫 Teacher Registration")
-            st.caption("🔒 Protected by Teacher Security Key.")
-            with st.form("t_signup"):
-                t_sec = st.text_input("Teacher Authorization Key:", type="password")
-                t_user = st.text_input("Preferred Username:")
-                t_name = st.text_input("Full Name:", value="HM Umer Choudhary")
-                t_pwd1 = st.text_input("Create Password (Min 8 characters):", type="password")
-                t_pwd2 = st.text_input("Confirm Password:", type="password")
-                btn_t_reg = st.form_submit_button("Create Teacher Account", use_container_width=True)
-
-                if btn_t_reg:
-                    if t_sec != TEACHER_KEY:
-                        st.error("Unauthorized: Invalid Teacher Authorization Key.")
-                    elif len(t_pwd1) < 8:
-                        st.error("Security Violation: Password must be at least 8 characters.")
-                    elif t_pwd1 != t_pwd2:
-                        st.error("Passwords do not match.")
-                    else:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("SELECT username FROM users WHERE username = ?", (t_user,))
-                        if c.fetchone():
-                            st.error("Username already taken.")
-                            conn.close()
-                        else:
-                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                                      (t_user, hash_password(t_pwd1), t_name, "Teacher", "All", ""))
-                            conn.commit()
-                            conn.close()
-                            st.success("Teacher account created! Please Sign In.")
-
-# ----------------- AUTHENTICATED USER CONSOLE -----------------
-else:
-    # Verify Single Device Active Session Token
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT active_token FROM users WHERE username = ?", (st.session_state.username,))
-    db_token = c.fetchone()
-    conn.close()
-    
-    if db_token and db_token[0] != "" and db_token[0] != st.session_state.token:
-        st.session_state.logged_in = False
-        st.error("Security Alert: Your account was accessed from another device. Logged out automatically.")
-        st.rerun()
-
-    render_header_banner()
-
-    # Sidebar
-    with st.sidebar:
-        st.markdown(f"### 👤 **{st.session_state.full_name}**")
-        st.caption(f"Role: **{st.session_state.role}**")
-        if st.session_state.role == "Student":
-            st.info(f"Enrolled Course:\n**{st.session_state.course_stream}**")
-        st.divider()
-
-        if st.session_state.role == "Teacher":
-            menu = st.radio("Teacher Management:", [
-                "📊 Overview & Quick Stats",
-                "📤 Upload & Change Material",
-                "🤖 AI Book Quiz Generator",
-                "📢 Update Announcement",
-                "👨‍🎓 Registered Students & Reports"
-            ])
-        else:
-            menu = st.radio("Student Portal:", [
-                "📚 My Course Material (7-Pillars)",
-                "⏱️ Take Timed Quiz & Test",
-                "📄 My Saved Reports & Grades"
-            ])
-
-        st.divider()
-        if st.button("🚪 Sign Out", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.session_state.full_name = ""
-            st.session_state.role = ""
-            st.session_state.course_stream = ""
-            st.session_state.test_active = False
-            st.rerun()
-
-    # ----------------- TEACHER VIEW (FULL CONTROL) -----------------
-    if st.session_state.role == "Teacher":
-
-        if menu == "📊 Overview & Quick Stats":
-            conn = sqlite3.connect(DB_FILE)
-            st_count = pd.read_sql_query("SELECT COUNT(*) as c FROM users WHERE role = 'Student'", conn).iloc[0]['c']
-            mat_count = pd.read_sql_query("SELECT COUNT(*) as c FROM portal_materials", conn).iloc[0]['c']
-            test_count = pd.read_sql_query("SELECT COUNT(*) as c FROM mock_tests", conn).iloc[0]['c']
-            conn.close()
-
-            c1, c2, c3 = st.columns(3)
-            c1.markdown(f'<div class="metric-card"><h3>{st_count}</h3><p>Enrolled Students</p></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="metric-card"><h3>{mat_count}</h3><p>Published Materials</p></div>', unsafe_allow_html=True)
-            c3.markdown(f'<div class="metric-card"><h3>{test_count}</h3><p>Active Tests</p></div>', unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.subheader("Student Distribution by Course")
-            conn = sqlite3.connect(DB_FILE)
-            dist = pd.read_sql_query("SELECT course_stream as 'Course', COUNT(*) as 'Students' FROM users WHERE role = 'Student' GROUP BY course_stream", conn)
-            conn.close()
-            st.table(dist if not dist.empty else pd.DataFrame({"Course": COURSES, "Students": [0, 0, 0]}))
-
-        elif menu == "📤 Upload & Change Material":
-            st.subheader("📤 Teacher Upload & Manage Material")
-            st.caption("Upload relevant books, notes, slides, MCQs, tests, and solutions.")
-
-            with st.form("upload_mat_form"):
-                sel_course = st.selectbox("Target Course:", COURSES)
-                sel_type = st.selectbox("Content Category:", CONTENT_TYPES)
-                mat_title = st.text_input("Material Title (e.g., Chapter 1 Comprehensive Notes):")
-                mat_file = st.file_uploader("Select File (PDF, DOCX, PPTX):", type=["pdf", "docx", "pptx"])
-                btn_up = st.form_submit_button("Upload Material")
-
-                if btn_up and mat_title and mat_file:
-                    safe_name = f"[{sel_type}]_{mat_file.name}"
-                    save_path = os.path.join(UPLOAD_DIR, safe_name)
-                    with open(save_path, "wb") as f:
-                        f.write(mat_file.getbuffer())
-
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("INSERT INTO portal_materials (course_stream, content_type, title, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?)",
-                              (sel_course, sel_type, mat_title, save_path, str(date.today())))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"{sel_type} '{mat_title}' uploaded for {sel_course}!")
-
-            st.markdown("---")
-            st.subheader("Manage & Delete Existing Materials")
-            conn = sqlite3.connect(DB_FILE)
-            all_mats = pd.read_sql_query("SELECT id, course_stream, content_type, title, uploaded_at FROM portal_materials ORDER BY id DESC", conn)
-            conn.close()
-            if not all_mats.empty:
-                st.dataframe(all_mats, use_container_width=True)
-                del_id = st.number_input("Enter Material ID to remove:", min_value=1, step=1)
-                if st.button("Delete Selected Material"):
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("DELETE FROM portal_materials WHERE id = ?", (del_id,))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Material #{del_id} removed successfully.")
-                    st.rerun()
-            else:
-                st.info("No materials published yet.")
-
-        elif menu == "🤖 AI Book Quiz Generator":
-            st.subheader("🤖 Upload Book PDF & AI Self-Made Quiz Generator")
-            st.write("Upload any textbook PDF, set the page range, and let the AI generate a timed MCQ test with Urdu and English explanations.")
-
-            with st.form("ai_book_quiz_form"):
-                col_a1, col_a2 = st.columns(2)
-                with col_a1:
-                    ai_c = st.selectbox("Select Target Course:", COURSES)
-                    ai_title = st.text_input("Quiz Title (e.g., IAS 16 Revaluation Test):")
-                with col_a2:
-                    pdf_input = st.file_uploader("Upload Book PDF:", type=["pdf"])
-                    col_p1, col_p2, col_p3 = st.columns(3)
-                    sp = col_p1.number_input("Start Page:", min_value=1, value=1)
-                    ep = col_p2.number_input("End Page:", min_value=1, value=5)
-                    nq = col_p3.number_input("No. of Questions:", min_value=1, max_value=25, value=5)
-
-                col_t1, col_t2 = st.columns(2)
-                t_timer = col_t1.number_input("Timer (Minutes):", min_value=5, max_value=180, value=15)
-                t_marks = col_t2.number_input("Total Marks:", min_value=5, max_value=100, value=15)
-
-                btn_gen = st.form_submit_button("⚡ AI Generate & Publish Timed Quiz", use_container_width=True)
-
-                if btn_gen:
-                    if not pdf_input or not ai_title:
-                        st.error("Please provide both the PDF file and Quiz Title.")
-                    elif sp > ep:
-                        st.error("Start Page cannot be greater than End Page.")
-                    else:
-                        with st.spinner("Extracting text and generating AI MCQs..."):
-                            extracted_txt, total_pages = extract_pdf_pages(pdf_input, int(sp), int(ep))
-                            if not extracted_txt:
-                                st.warning("No readable text found on those pages. Please ensure the PDF is text-based.")
-                            else:
-                                mcqs = generate_ai_mcqs(extracted_txt, int(nq), ai_title)
-                                conn = sqlite3.connect(DB_FILE)
-                                c = conn.cursor()
-                                c.execute("INSERT INTO mock_tests (course_stream, title, duration_minutes, total_marks, created_at) VALUES (?, ?, ?, ?, ?)",
-                                          (ai_c, f"[AI] {ai_title}", t_timer, t_marks, str(date.today())))
-                                new_tid = c.lastrowid
-                                for m in mcqs:
-                                    c.execute("INSERT INTO test_questions (test_id, question, opt_a, opt_b, opt_c, opt_d, correct_opt, exp_en, exp_ur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                              (new_tid, m['q'], m['a'], m['b'], m['c'], m['d'], m['correct'], m['exp_en'], m['exp_ur']))
-                                conn.commit()
-                                conn.close()
-                                st.success(f"Generated {len(mcqs)} questions for {ai_c} from pages {sp}-{ep}! Live for enrolled students.")
-
-        elif menu == "📢 Update Announcement":
-            st.subheader("📢 Update Top Status / Announcement")
-            with st.form("ann_form"):
-                new_msg = st.text_area("Write Announcement for Students:")
-                if st.form_submit_button("Update Status"):
-                    if new_msg:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("INSERT INTO announcements (message, updated_at) VALUES (?, ?)", (new_msg, str(date.today())))
-                        conn.commit()
-                        conn.close()
-                        st.success("Announcement updated!")
-                        st
+                            c.execute("INS
