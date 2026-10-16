@@ -5,13 +5,14 @@ import os
 import hashlib
 import io
 import time
+import uuid
 import re
 from datetime import date, datetime
 from pypdf import PdfReader
 
 # ----------------- PAGE CONFIGURATION & STYLING -----------------
 st.set_page_config(
-    page_title="HM Umer Choudhary Learning Portal",
+    page_title="HM Umer Ch. Learning Portal",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -21,150 +22,102 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { font-family: 'Inter', sans-serif; }
-    .main-header {
-        background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
-        padding: 24px;
-        border-radius: 12px;
+    .status-banner {
+        background: linear-gradient(135deg, #1E3A8A 0%, #0F172A 100%);
         color: white;
-        text-align: center;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+        padding: 16px 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
     }
-    .main-header h1 {
+    .status-banner h2 {
         margin: 0;
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #FFFFFF;
-        letter-spacing: 0.5px;
+        font-size: 1.6rem;
+        color: #F8FAFC;
     }
-    .main-header p {
-        margin: 6px 0 0 0;
-        font-size: 1rem;
+    .status-banner p {
+        margin: 5px 0 0 0;
         color: #93C5FD;
+        font-size: 0.95rem;
     }
     .metric-card {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 18px;
+        border-radius: 8px;
+        padding: 15px;
         text-align: center;
         border-top: 4px solid #1E3A8A;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .metric-card h3 {
         margin: 0;
-        font-size: 1.8rem;
         color: #1E3A8A;
-        font-weight: 700;
+        font-size: 1.8rem;
     }
     .metric-card p {
-        margin: 5px 0 0 0;
-        font-size: 0.85rem;
+        margin: 4px 0 0 0;
         color: #64748B;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-    .course-badge {
-        display: inline-block;
-        background-color: #DBEAFE;
-        color: #1E40AF;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         font-weight: 600;
     }
     .solution-box {
         background-color: #F8FAFC;
-        border-left: 4px solid #3B82F6;
-        padding: 15px;
+        border-left: 4px solid #2563EB;
+        padding: 12px 16px;
         border-radius: 6px;
-        margin-top: 10px;
+        margin: 10px 0;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# ----------------- SECURITY & CONSTANTS -----------------
+# ----------------- CONSTANTS & DATABASE SETUP -----------------
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 TEACHER_KEY = "HMUMER786"
-DB_FILE = "portal_core.db"
-UPLOAD_DIR = "academic_resources"
+DB_FILE = "hm_umer_portal.db"
+UPLOAD_DIR = "academy_content"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ----------------- COURSE STRUCTURE -----------------
-COURSES_DATA = {
-    "PRC (CA Foundation)": [
-        "PRC-1 Business Writing & Comprehension",
-        "PRC-2 Quantitative Methods",
-        "PRC-3 Principles of Economics",
-        "PRC-4 Introduction to Accounting",
-        "PRC-5 Business Law"
-    ],
-    "CAF Group A": [
-        "CAF-1 Financial Accounting & Reporting 1 (FAR-1)",
-        "CAF-2 Tax Practices",
-        "CAF-3 Cost & Management Accounting",
-        "CAF-4 Business Law"
-    ],
-    "CAF Group B": [
-        "CAF-5 Financial Accounting & Reporting 2 (FAR-2)",
-        "CAF-6 Managerial & Financial Analysis",
-        "CAF-7 Company Law",
-        "CAF-8 Audit & Assurance"
-    ],
-    "ACCA": [
-        "FA1/FA2/FFA Financial Accounting",
-        "MA1/MA2/FMA Management Accounting",
-        "FR Financial Reporting",
-        "AA Audit & Assurance",
-        "PM Performance Management",
-        "TX Taxation",
-        "FM Financial Management"
-    ]
-}
+# Exact Subjects from handwritten spec
+COURSES = [
+    "PRC-1 Fundamental of Accounting",
+    "CAF-1 Financial Accounting & Reporting 1",
+    "F3 Financial Accounting (ACCA)"
+]
 
-# ----------------- DATABASE SCHEMA -----------------
+CONTENT_TYPES = ["Book", "Notes", "Slides", "MCQ", "Test", "Solution"]
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password TEXT,
         full_name TEXT,
-        role TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS students (
-        crn TEXT PRIMARY KEY,
-        name TEXT,
+        role TEXT,
         course_stream TEXT,
-        email TEXT,
-        contact TEXT
+        active_token TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance_sessions (
-        session_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        course_stream TEXT,
-        subject TEXT,
-        pin TEXT,
-        session_date TEXT,
-        status TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS student_attendance (
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS portal_materials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER,
-        crn TEXT,
-        marked_at TEXT,
-        FOREIGN KEY (session_id) REFERENCES attendance_sessions(session_id)
+        course_stream TEXT,
+        content_type TEXT,
+        title TEXT,
+        file_path TEXT,
+        uploaded_at TEXT
     )''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS mock_tests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         course_stream TEXT,
-        subject TEXT,
         title TEXT,
         duration_minutes INTEGER,
         total_marks INTEGER,
         created_at TEXT
     )''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS test_questions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         test_id INTEGER,
@@ -177,130 +130,122 @@ def init_db():
         exp_en TEXT,
         exp_ur TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS student_test_results (
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS student_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        crn TEXT,
+        username TEXT,
+        course_stream TEXT,
         test_id INTEGER,
         score INTEGER,
         total INTEGER,
         submitted_at TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS study_materials (
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS discussions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         course_stream TEXT,
-        subject TEXT,
-        title TEXT,
-        file_path TEXT,
-        uploaded_at TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS video_lectures (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        course_stream TEXT,
-        subject TEXT,
-        title TEXT,
-        video_url TEXT,
-        added_at TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS notices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        course_stream TEXT,
+        sender_name TEXT,
+        sender_role TEXT,
         message TEXT,
-        posted_at TEXT
+        created_at TEXT
     )''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS announcements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT,
+        updated_at TEXT
+    )''')
+    
+    # Default Teacher Account
     c.execute("SELECT * FROM users WHERE username = 'admin'")
     if not c.fetchone():
-        c.execute("INSERT INTO users VALUES (?, ?, ?, ?)",
-                  ("admin", hash_password("admin123"), "HM Umer Choudhary", "Teacher"))
+        c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+                  ("admin", hash_password("admin123"), "HM Umer Choudhary", "Teacher", "All", ""))
+        
+    c.execute("SELECT * FROM announcements")
+    if not c.fetchone():
+        c.execute("INSERT INTO announcements (message, updated_at) VALUES (?, ?)",
+                  ("Welcome to HM UMER Ch. Portal. Tests and lectures updated daily.", str(date.today())))
+        
     conn.commit()
     conn.close()
 
 init_db()
 
-# ----------------- PDF EXTRACTOR & MCQ GENERATOR -----------------
-def extract_text_from_pdf(pdf_file, start_page, end_page):
+# ----------------- AI QUIZ GENERATOR HELPER -----------------
+def extract_pdf_pages(pdf_file, start_p, end_p):
     reader = PdfReader(pdf_file)
-    total_pages = len(reader.pages)
-    
-    start_idx = max(0, start_page - 1)
-    end_idx = min(total_pages, end_page)
-    
-    extracted_text = ""
-    for p_no in range(start_idx, end_idx):
-        page = reader.pages[p_no]
-        txt = page.extract_text()
-        if txt:
-            extracted_text += txt + "\n"
-            
-    return extracted_text.strip(), total_pages
+    total_len = len(reader.pages)
+    s_idx = max(0, start_p - 1)
+    e_idx = min(total_len, end_p)
+    text = ""
+    for idx in range(s_idx, e_idx):
+        extracted = reader.pages[idx].extract_text()
+        if extracted:
+            text += extracted + "\n"
+    return text.strip(), total_len
 
-def generate_mcqs_from_extracted_text(text_content, num_questions, topic_title):
-    # Split text into meaningful sentences
-    sentences = [s.strip() for s in re.split(r'[\.\n\r]+', text_content) if len(s.strip()) > 35]
+def generate_ai_mcqs(text_passage, num_q, topic):
+    sentences = [s.strip() for s in re.split(r'[\.\n\r]+', text_passage) if len(s.strip()) > 35]
     mcqs = []
-    
-    distractor_pool = [
-        "Historical cost adjusted for standard fair value",
-        "Immediate derecognition and direct profit/loss write-off",
-        "Discretionary management disclosure without audit",
-        "Amortized over arbitrary management tenure",
-        "Restrospective restatement prohibited by framework",
-        "Contingent liability recognized without obligation",
-        "Recorded exclusively on cash settlement basis"
+    distractors = [
+        "Direct charge to retained earnings",
+        "Fair value through profit and loss valuation",
+        "Discretionary adjustment at balance sheet date",
+        "Deferred realization method over contract period",
+        "Historical cost without subsequent impairment"
     ]
     
     if not sentences:
-        for i in range(num_questions):
+        for i in range(num_q):
             mcqs.append({
-                "question": f"Q{i+1}: What is the statutory financial reporting requirement regarding {topic_title}?",
-                "a": "Faithful representation and compliance with relevant IFRS/statutory framework",
-                "b": "Total exemption from audit oversight",
-                "c": "Arbitrary recognition without verification",
-                "d": "Pure cash basis reporting only",
+                "q": f"Q{i+1}: What is the fundamental compliance rule for {topic}?",
+                "a": "Faithful representation in accordance with applicable framework",
+                "b": "Discretionary recognition without documentation",
+                "c": "Cash-basis realization only",
+                "d": "Complete write-off upon purchase",
                 "correct": "A",
-                "exp_en": f"Standard rules for {topic_title} require faithful representation and compliance with applicable accounting and reporting frameworks.",
-                "exp_ur": f"{topic_title} کے قواعد کے مطابق مالیاتی بیانات کی شفافیت اور متعلقہ اکاؤنٹنگ فریم ورک پر عمل درآمد لازمی ہے۔"
+                "exp_en": f"Under IAS/IFRS and statutory standards for {topic}, transactions must ensure faithful representation.",
+                "exp_ur": f"{topic} کے اصولوں کے تحت تمام لین دین کی شفاف اور درست فریم ورک کے تحت نمائندگی لازمی ہے۔"
             })
         return mcqs
 
-    step = max(1, len(sentences) // num_questions)
-    selected_sentences = sentences[0::step][:num_questions]
+    step = max(1, len(sentences) // num_q)
+    sample = sentences[0::step][:num_q]
     
-    for idx, s in enumerate(selected_sentences):
+    for idx, s in enumerate(sample):
         words = s.split()
         if len(words) >= 6:
             mid = len(words) // 2
-            target_word = words[mid].strip(",.()\"':;")
-            if len(target_word) < 4:
-                target_word = words[mid-1].strip(",.()\"':;")
-                
-            prompt = s.replace(target_word, "________")
-            distractors = [d for d in distractor_pool if d != target_word][:3]
+            target = words[mid].strip(",.()\"';:")
+            if len(target) < 4:
+                target = words[mid - 1].strip(",.()\"';:")
+            prompt = s.replace(target, "_______")
+            dist = [d for d in distractors if d != target][:3]
             
             mcqs.append({
-                "question": f"Q{idx+1}: Complete the statement from book ({topic_title}): \"{prompt}\"",
-                "a": target_word,
-                "b": distractors[0] if len(distractors) > 0 else "Optional disclosure",
-                "c": distractors[1] if len(distractors) > 1 else "Direct expense debit",
-                "d": distractors[2] if len(distractors) > 2 else "Non-current classification",
+                "q": f"Q{idx+1} ({topic}): Complete the official statement: \"{prompt}\"",
+                "a": target,
+                "b": dist[0] if len(dist) > 0 else "Accrued cost liability",
+                "c": dist[1] if len(dist) > 1 else "Non-operating provision",
+                "d": dist[2] if len(dist) > 2 else "Unrealized capital gain",
                 "correct": "A",
-                "exp_en": f"From the textbook text: \"{s}\". The missing technical component is '{target_word}'.",
-                "exp_ur": f"کتابی متن کے مطابق اصل جملہ تھا: \"{s}\"۔ اس اصول کی مناسب تشریح کے لیے درست جواب '{target_word}' ہے۔"
+                "exp_en": f"Official Book Text: \"{s}\". The missing keyword is '{target}'.",
+                "exp_ur": f"کتابی متن کے مطابق اصل جملہ تھا: \"{s}\"۔ اس اصول کی درست وضاحت کے لیے درست لفظ '{target}' ہے۔"
             })
             
-    # Fallback if fewer questions formed
-    while len(mcqs) < num_questions:
-        q_num = len(mcqs) + 1
+    while len(mcqs) < num_q:
+        i = len(mcqs) + 1
         mcqs.append({
-            "question": f"Q{q_num}: Which criterion is fundamental for {topic_title} evaluation?",
-            "a": "Materiality and prudent recognition",
-            "b": "Complete postponement of disclosures",
-            "c": "Unilateral assessment without verification",
-            "d": "Disregard of accrual accounting principle",
+            "q": f"Q{i}: How must transactions under {topic} be measured?",
+            "a": "In line with substance over form and relevant IFRS",
+            "b": "Arbitrary estimation by internal staff",
+            "c": "Postponed indefinitely without disclosure",
+            "d": "Only when approved by tax authority",
             "correct": "A",
-            "exp_en": f"Prudence and materiality are core underlying assumptions applicable to {topic_title}.",
-            "exp_ur": f"{topic_title} میں اصول احتیاط اور اہمیت (Materiality) پر عمل درآمد ضروری ہے۔"
+            "exp_en": "Standard requires substance over form and adherence to relevant financial reporting standards.",
+            "exp_ur": "اکاؤنٹنگ کا بنیادی اصول ہے کہ لین دین کو ظاہری شکل کے بجائے ان کی اصل حقیقت کے مطابق لکھا جائے۔"
         })
-        
     return mcqs
 
 # ----------------- SESSION STATE -----------------
@@ -310,6 +255,7 @@ if "logged_in" not in st.session_state:
     st.session_state.full_name = ""
     st.session_state.role = ""
     st.session_state.course_stream = ""
+    st.session_state.token = ""
 
 if "test_active" not in st.session_state:
     st.session_state.test_active = False
@@ -318,143 +264,164 @@ if "test_active" not in st.session_state:
     st.session_state.test_submitted = False
     st.session_state.last_submission = {}
 
-# ----------------- AUTHENTICATION -----------------
-if not st.session_state.logged_in:
-    st.markdown("""
-        <div class="main-header">
-            <h1>HM UMER CHOUDHARY</h1>
-            <p>Chartered Accountancy & Commerce Learning Management System</p>
+# ----------------- ANNOUNCEMENT BANNER -----------------
+def render_header_banner():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT message FROM announcements ORDER BY id DESC LIMIT 1")
+    ann = c.fetchone()
+    conn.close()
+    msg = ann[0] if ann else "No current updates."
+    
+    st.markdown(f"""
+        <div class="status-banner">
+            <h2>HM UMER ch. Status / Announcement</h2>
+            <p>📢 {msg}</p>
         </div>
     """, unsafe_allow_html=True)
 
+# ----------------- AUTHENTICATION (NO DATA LEAK) -----------------
+if not st.session_state.logged_in:
+    render_header_banner()
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        auth_mode = st.radio("Choose Action:", ["Sign In", "Student Sign Up", "Faculty Sign Up"], horizontal=True)
+        auth_action = st.radio("Choose Portal Access:", ["Sign In", "Student Sign Up", "Teacher Sign Up"], horizontal=True)
 
-        if auth_mode == "Sign In":
+        if auth_action == "Sign In":
             st.markdown("### 🔐 Secure Sign In")
-            with st.form("signin_form"):
-                in_user = st.text_input("Username or CRN Roll No:")
-                in_pass = st.text_input("Password:", type="password")
-                btn_login = st.form_submit_button("Sign In", use_container_width=True)
+            with st.form("signin_box"):
+                u_in = st.text_input("Username / CRN:")
+                p_in = st.text_input("Password:", type="password")
+                btn_sub = st.form_submit_button("Sign In", use_container_width=True)
 
-                if btn_login:
+                if btn_sub:
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
-                    c.execute("SELECT username, full_name, role FROM users WHERE username = ? AND password = ?",
-                              (in_user, hash_password(in_pass)))
-                    user_data = c.fetchone()
-                    
-                    if user_data:
-                        st.session_state.logged_in = True
-                        st.session_state.username = user_data[0]
-                        st.session_state.full_name = user_data[1]
-                        st.session_state.role = user_data[2]
-                        
-                        if user_data[2] == "Student":
-                            c.execute("SELECT course_stream FROM students WHERE crn = ?", (user_data[0],))
-                            st_res = c.fetchone()
-                            st.session_state.course_stream = st_res[0] if st_res else "PRC (CA Foundation)"
+                    c.execute("SELECT username, full_name, role, course_stream, active_token FROM users WHERE username = ? AND password = ?",
+                              (u_in, hash_password(p_in)))
+                    user = c.fetchone()
+
+                    if user:
+                        # 1 Person 1 Device Security Token
+                        new_device_token = str(uuid.uuid4())
+                        c.execute("UPDATE users SET active_token = ? WHERE username = ?", (new_device_token, user[0]))
+                        conn.commit()
                         conn.close()
-                        st.success(f"Welcome, {user_data[1]}!")
+
+                        st.session_state.logged_in = True
+                        st.session_state.username = user[0]
+                        st.session_state.full_name = user[1]
+                        st.session_state.role = user[2]
+                        st.session_state.course_stream = user[3]
+                        st.session_state.token = new_device_token
+                        st.success(f"Welcome {user[1]}!")
                         st.rerun()
                     else:
                         conn.close()
-                        st.error("Invalid Username or Password.")
+                        st.error("Invalid credentials entered.")
             st.info("💡 Default Faculty Login: `admin` | Password: `admin123`")
 
-        elif auth_mode == "Faculty Sign Up":
-            st.markdown("### 👨‍🏫 Faculty Member Registration")
-            with st.form("faculty_reg"):
-                f_sec = st.text_input("Faculty Authorization Key:", type="password")
-                f_user = st.text_input("Preferred Faculty Username:")
-                f_name = st.text_input("Official Name:", value="HM Umer Choudhary")
-                f_pwd1 = st.text_input("Password:", type="password")
-                f_pwd2 = st.text_input("Confirm Password:", type="password")
-                btn_f_reg = st.form_submit_button("Register Faculty Account", use_container_width=True)
-
-                if btn_f_reg:
-                    if f_sec != TEACHER_KEY:
-                        st.error("Unauthorized: Incorrect security authorization key.")
-                    elif not f_user or not f_pwd1:
-                        st.warning("Please fill all required fields.")
-                    elif f_pwd1 != f_pwd2:
-                        st.error("Passwords do not match.")
-                    else:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("SELECT username FROM users WHERE username = ?", (f_user,))
-                        if c.fetchone():
-                            st.error("This username already exists.")
-                            conn.close()
-                        else:
-                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?)",
-                                      (f_user, hash_password(f_pwd1), f_name, "Teacher"))
-                            conn.commit()
-                            conn.close()
-                            st.success(f"Faculty account created successfully for {f_name}. Switch to Sign In.")
-
-        else:
+        elif auth_action == "Student Sign Up":
             st.markdown("### 👨‍🎓 Student Registration")
-            with st.form("student_reg"):
-                s_crn = st.text_input("Student CRN / Roll Number (Login Username):")
-                s_name = st.text_input("Full Legal Name:")
-                s_stream = st.selectbox("Select Enrolled Course Program:", list(COURSES_DATA.keys()))
-                s_email = st.text_input("Email Address:")
-                s_phone = st.text_input("WhatsApp / Contact Number:")
-                s_pwd1 = st.text_input("Password:", type="password")
+            st.caption("🔒 Security Enforcement: Minimum 8-character password. 1 Person can use only 1 Device.")
+            with st.form("st_signup"):
+                s_crn = st.text_input("Student CRN / Roll Number (Used as Login):")
+                s_name = st.text_input("Full Name:")
+                s_course = st.selectbox("Select Your Course:", COURSES)
+                s_pwd1 = st.text_input("Create Password (Min 8 characters):", type="password")
                 s_pwd2 = st.text_input("Confirm Password:", type="password")
-                btn_s_reg = st.form_submit_button("Complete Student Enrollment", use_container_width=True)
+                btn_st_reg = st.form_submit_button("Register Student", use_container_width=True)
 
-                if btn_s_reg:
-                    if not s_crn or not s_name or not s_pwd1:
-                        st.warning("Please complete all essential fields.")
+                if btn_st_reg:
+                    if len(s_pwd1) < 8:
+                        st.error("Security Violation: Password must be at least 8 characters long.")
                     elif s_pwd1 != s_pwd2:
                         st.error("Passwords do not match.")
+                    elif not s_crn or not s_name:
+                        st.warning("Please fill all fields.")
                     else:
                         conn = sqlite3.connect(DB_FILE)
                         c = conn.cursor()
                         c.execute("SELECT username FROM users WHERE username = ?", (s_crn,))
                         if c.fetchone():
-                            st.error("This CRN is already registered in the system.")
+                            st.error("This Roll No/CRN is already registered.")
                             conn.close()
                         else:
-                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?)",
-                                      (s_crn, hash_password(s_pwd1), s_name, "Student"))
-                            c.execute("INSERT INTO students VALUES (?, ?, ?, ?, ?)",
-                                      (s_crn, s_name, s_stream, s_email, s_phone))
+                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+                                      (s_crn, hash_password(s_pwd1), s_name, "Student", s_course, ""))
                             conn.commit()
                             conn.close()
-                            st.success("Registration completed successfully! Please proceed to Sign In.")
+                            st.success("Registration complete! You can now Sign In.")
 
-# ----------------- MAIN CONSOLE -----------------
+        elif auth_action == "Teacher Sign Up":
+            st.markdown("### 👨‍🏫 Teacher Registration")
+            st.caption("🔒 Protected by Teacher Security Key.")
+            with st.form("t_signup"):
+                t_sec = st.text_input("Teacher Authorization Key:", type="password")
+                t_user = st.text_input("Preferred Username:")
+                t_name = st.text_input("Full Name:", value="HM Umer Choudhary")
+                t_pwd1 = st.text_input("Create Password (Min 8 characters):", type="password")
+                t_pwd2 = st.text_input("Confirm Password:", type="password")
+                btn_t_reg = st.form_submit_button("Create Teacher Account", use_container_width=True)
+
+                if btn_t_reg:
+                    if t_sec != TEACHER_KEY:
+                        st.error("Unauthorized: Invalid Teacher Authorization Key.")
+                    elif len(t_pwd1) < 8:
+                        st.error("Security Violation: Password must be at least 8 characters.")
+                    elif t_pwd1 != t_pwd2:
+                        st.error("Passwords do not match.")
+                    else:
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("SELECT username FROM users WHERE username = ?", (t_user,))
+                        if c.fetchone():
+                            st.error("Username already taken.")
+                            conn.close()
+                        else:
+                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+                                      (t_user, hash_password(t_pwd1), t_name, "Teacher", "All", ""))
+                            conn.commit()
+                            conn.close()
+                            st.success("Teacher account created! Please Sign In.")
+
+# ----------------- AUTHENTICATED USER CONSOLE -----------------
 else:
+    # Verify Single Device Active Session Token
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT active_token FROM users WHERE username = ?", (st.session_state.username,))
+    db_token = c.fetchone()
+    conn.close()
+    
+    if db_token and db_token[0] != "" and db_token[0] != st.session_state.token:
+        st.session_state.logged_in = False
+        st.error("Security Alert: Your account was accessed from another device. Logged out automatically.")
+        st.rerun()
+
+    render_header_banner()
+
+    # Sidebar
     with st.sidebar:
         st.markdown(f"### 👤 **{st.session_state.full_name}**")
-        st.markdown(f"<span class='course-badge'>{st.session_state.role}</span>", unsafe_allow_html=True)
+        st.caption(f"Role: **{st.session_state.role}**")
         if st.session_state.role == "Student":
-            st.caption(f"Stream: **{st.session_state.course_stream}**")
-            st.caption(f"CRN: `{st.session_state.username}`")
+            st.info(f"Enrolled Course:\n**{st.session_state.course_stream}**")
         st.divider()
 
         if st.session_state.role == "Teacher":
-            menu_choice = st.radio("Teacher Management:", [
-                "📊 Faculty Dashboard",
-                "📖 Book PDF to AI Quiz Generator",
-                "👨‍🎓 Student Directory & Export",
-                "📚 Notes & Study Text Center",
-                "🎥 Video Lectures Manager",
-                "🛡️ Anti-Cheat Attendance Desk",
-                "📢 Notice Board"
+            menu = st.radio("Teacher Management:", [
+                "📊 Overview & Quick Stats",
+                "📤 Upload & Change Material",
+                "🤖 AI Book Quiz Generator",
+                "📢 Update Announcement",
+                "👨‍🎓 Registered Students & Reports"
             ])
         else:
-            menu_choice = st.radio("Student Portal:", [
-                "📈 My Performance & Overview",
-                "⏱️ Take Timed Quiz / Test",
-                "📚 My Study Materials",
-                "🎥 My Video Lectures",
-                "🛡️ Mark My Attendance",
-                "📄 Academic Report Card"
+            menu = st.radio("Student Portal:", [
+                "📚 My Course Material (7-Pillars)",
+                "⏱️ Take Timed Quiz & Test",
+                "📄 My Saved Reports & Grades"
             ])
 
         st.divider()
@@ -467,455 +434,128 @@ else:
             st.session_state.test_active = False
             st.rerun()
 
-    # ----------------- TEACHER INTERFACE -----------------
+    # ----------------- TEACHER VIEW (FULL CONTROL) -----------------
     if st.session_state.role == "Teacher":
-        st.markdown(f"""
-            <div class="main-header">
-                <h1>HM UMER CHOUDHARY FACULTY DESK</h1>
-                <p>Academic Program Control, Book PDF AI Quiz Engine & Student Monitoring</p>
-            </div>
-        """, unsafe_allow_html=True)
 
-        if menu_choice == "📊 Faculty Dashboard":
+        if menu == "📊 Overview & Quick Stats":
             conn = sqlite3.connect(DB_FILE)
-            tot_st = pd.read_sql_query("SELECT COUNT(*) as c FROM students", conn).iloc[0]['c']
-            tot_ts = pd.read_sql_query("SELECT COUNT(*) as c FROM mock_tests", conn).iloc[0]['c']
-            tot_fl = len(os.listdir(UPLOAD_DIR))
-            tot_vd = pd.read_sql_query("SELECT COUNT(*) as c FROM video_lectures", conn).iloc[0]['c']
+            st_count = pd.read_sql_query("SELECT COUNT(*) as c FROM users WHERE role = 'Student'", conn).iloc[0]['c']
+            mat_count = pd.read_sql_query("SELECT COUNT(*) as c FROM portal_materials", conn).iloc[0]['c']
+            test_count = pd.read_sql_query("SELECT COUNT(*) as c FROM mock_tests", conn).iloc[0]['c']
             conn.close()
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.markdown(f'<div class="metric-card"><h3>{tot_st}</h3><p>Enrolled Students</p></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="metric-card"><h3>{tot_ts}</h3><p>AI & Manual Tests</p></div>', unsafe_allow_html=True)
-            c3.markdown(f'<div class="metric-card"><h3>{tot_fl}</h3><p>Uploaded Documents</p></div>', unsafe_allow_html=True)
-            c4.markdown(f'<div class="metric-card"><h3>{tot_vd}</h3><p>Published Videos</p></div>', unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.subheader("📋 Student Distribution by Stream")
-            conn = sqlite3.connect(DB_FILE)
-            dist_df = pd.read_sql_query("SELECT course_stream as 'Course Program', COUNT(*) as 'Student Count' FROM students GROUP BY course_stream", conn)
-            conn.close()
-            if not dist_df.empty:
-                st.table(dist_df)
-            else:
-                st.info("No students enrolled yet.")
-
-        elif menu_choice == "📖 Book PDF to AI Quiz Generator":
-            st.subheader("📖 Upload Book PDF & Generate Specific-Page AI Quiz")
-            st.write("Upload a textbook or notes PDF, specify the page range (e.g., Page 15 to 20), set the number of questions, and the AI will generate questions directly from that text!")
-
-            with st.form("pdf_ai_generator_form"):
-                col_c1, col_c2 = st.columns(2)
-                with col_c1:
-                    ai_stream = st.selectbox("Target Course Stream:", list(COURSES_DATA.keys()))
-                    ai_subject = st.selectbox("Target Subject:", COURSES_DATA[ai_stream])
-                    quiz_title = st.text_input("Quiz Title (e.g., IAS 23 Borrowing Costs - Pages 45-50):")
-                with col_c2:
-                    pdf_doc = st.file_uploader("Upload Book / Chapter PDF:", type=["pdf"])
-                    col_p1, col_p2, col_p3 = st.columns(3)
-                    start_p = col_p1.number_input("Start Page:", min_value=1, value=1)
-                    end_p = col_p2.number_input("End Page:", min_value=1, value=5)
-                    num_q = col_p3.number_input("No. of Questions:", min_value=1, max_value=25, value=5)
-
-                col_t1, col_t2 = st.columns(2)
-                test_timer = col_t1.number_input("Test Timer (Minutes):", min_value=5, max_value=180, value=15)
-                test_total_marks = col_t2.number_input("Total Test Marks:", min_value=5, max_value=200, value=15)
-
-                btn_generate_from_pdf = st.form_submit_button("⚡ Generate AI Quiz From Selected Pages & Publish Test", use_container_width=True)
-
-                if btn_generate_from_pdf:
-                    if not pdf_doc:
-                        st.error("Please upload a PDF file first.")
-                    elif not quiz_title:
-                        st.error("Please specify a Quiz Title.")
-                    elif start_p > end_p:
-                        st.error("Start Page cannot be greater than End Page.")
-                    else:
-                        with st.spinner("Reading PDF pages and generating AI questions..."):
-                            extracted_text, total_p = extract_text_from_pdf(pdf_doc, int(start_p), int(end_p))
-                            
-                            if not extracted_text:
-                                st.warning(f"Could not extract readable text from pages {start_p}-{end_p}. Please ensure the PDF has selectable text (not scanned images).")
-                            else:
-                                mcq_items = generate_mcqs_from_extracted_text(extracted_text, int(num_q), quiz_title)
-                                
-                                conn = sqlite3.connect(DB_FILE)
-                                c = conn.cursor()
-                                c.execute("INSERT INTO mock_tests (course_stream, subject, title, duration_minutes, total_marks, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                                          (ai_stream, ai_subject, f"[AI Book Test] {quiz_title}", test_timer, test_total_marks, str(date.today())))
-                                test_id = c.lastrowid
-                                
-                                for item in mcq_items:
-                                    c.execute("INSERT INTO test_questions (test_id, question, opt_a, opt_b, opt_c, opt_d, correct_opt, exp_en, exp_ur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                              (test_id, item['question'], item['a'], item['b'], item['c'], item['d'], item['correct'], item['exp_en'], item['exp_ur']))
-                                conn.commit()
-                                conn.close()
-                                
-                                st.success(f"🎉 Success! Extracted text from pages {start_p}-{end_p} (Total Book Pages: {total_p}). Generated {len(mcq_items)} MCQs and published as live timed test for {ai_stream} students!")
-
-            st.markdown("---")
-            st.markdown("#### 📋 Published Timed Tests in Database")
-            conn = sqlite3.connect(DB_FILE)
-            t_published = pd.read_sql_query("SELECT id, course_stream, subject, title, duration_minutes, total_marks FROM mock_tests ORDER BY id DESC", conn)
-            conn.close()
-            if not t_published.empty:
-                st.dataframe(t_published, use_container_width=True)
-
-        elif menu_choice == "👨‍🎓 Student Directory & Export":
-            st.subheader("👨‍🎓 Complete Student Directory")
-            conn = sqlite3.connect(DB_FILE)
-            s_all = pd.read_sql_query("SELECT crn as 'CRN / Roll No', name as 'Student Name', course_stream as 'Program', email as 'Email Address', contact as 'WhatsApp No' FROM students", conn)
-            conn.close()
-
-            if not s_all.empty:
-                out = io.BytesIO()
-                with pd.ExcelWriter(out, engine='openpyxl') as writer:
-                    s_all.to_excel(writer, index=False, sheet_name="Students_List")
-                
-                col_d1, col_d2 = st.columns([3, 1])
-                with col_d2:
-                    st.download_button(
-                        label="📥 Export to Excel (.xlsx)",
-                        data=out.getvalue(),
-                        file_name=f"Students_Directory_{date.today()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                st.dataframe(s_all, use_container_width=True)
-            else:
-                st.info("Student directory is currently empty.")
-
-        elif menu_choice == "📚 Notes & Study Text Center":
-            st.subheader("📚 Upload Subject-Wise Books & Lecture Notes")
-            u_stream = st.selectbox("Select Target Course Program:", list(COURSES_DATA.keys()))
-            u_subject = st.selectbox("Select Subject:", COURSES_DATA[u_stream])
-            u_title = st.text_input("Material Title (e.g. IAS 16 Comprehensive Summary Notes):")
-            u_file = st.file_uploader("Select PDF or Document:", type=["pdf", "docx", "pptx", "xlsx"])
-
-            if st.button("Upload Document", use_container_width=True):
-                if u_file and u_title:
-                    clean_name = f"[{u_stream.split()[0]}]_{u_file.name}"
-                    save_path = os.path.join(UPLOAD_DIR, clean_name)
-                    with open(save_path, "wb") as f:
-                        f.write(u_file.getbuffer())
-                    
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("INSERT INTO study_materials (course_stream, subject, title, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?)",
-                              (u_stream, u_subject, u_title, save_path, str(date.today())))
-                    conn.commit()
-                    conn.close()
-                    st.success("Study material published to enrolled students successfully!")
-
-        elif menu_choice == "🎥 Video Lectures Manager":
-            st.subheader("🎥 Publish Video Lecture Links")
-            v_stream = st.selectbox("Select Course Program:", list(COURSES_DATA.keys()))
-            v_subject = st.selectbox("Select Subject:", COURSES_DATA[v_stream])
-            v_title = st.text_input("Lecture Title (e.g. Sales Tax Computation Lecture 01):")
-            v_url = st.text_input("Video Web Link (YouTube, Vimeo, Google Drive):")
-
-            if st.button("Publish Video Lecture", use_container_width=True):
-                if v_title and v_url:
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("INSERT INTO video_lectures (course_stream, subject, title, video_url, added_at) VALUES (?, ?, ?, ?, ?)",
-                              (v_stream, v_subject, v_title, v_url, str(date.today())))
-                    conn.commit()
-                    conn.close()
-                    st.success("Video lecture published!")
-
-        elif menu_choice == "🛡️ Anti-Cheat Attendance Desk":
-            st.subheader("🛡️ Secure Anti-Cheat Attendance Session Generator")
-            col_att1, col_att2 = st.columns([1, 1])
-            with col_att1:
-                att_stream = st.selectbox("Course Program for Class:", list(COURSES_DATA.keys()))
-                att_subject = st.selectbox("Class Subject:", COURSES_DATA[att_stream])
-                att_pin = st.text_input("Set 4-Digit Secure PIN (e.g. 8492):", max_chars=4)
-                
-                if st.button("Start Live Attendance Session", use_container_width=True):
-                    if len(att_pin) == 4:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("INSERT INTO attendance_sessions (course_stream, subject, pin, session_date, status) VALUES (?, ?, ?, ?, 'OPEN')",
-                                  (att_stream, att_subject, att_pin, str(date.today())))
-                        conn.commit()
-                        conn.close()
-                        st.success(f"Live session initialized! Announce PIN '{att_pin}' to students.")
-                    else:
-                        st.error("PIN must be exactly 4 digits.")
-
-            with col_att2:
-                st.markdown("#### Active / Recent Sessions")
-                conn = sqlite3.connect(DB_FILE)
-                sessions_df = pd.read_sql_query("SELECT session_id, course_stream, subject, pin, session_date, status FROM attendance_sessions ORDER BY session_id DESC LIMIT 5", conn)
-                conn.close()
-                if not sessions_df.empty:
-                    st.dataframe(sessions_df, use_container_width=True)
-                else:
-                    st.info("No active attendance sessions created yet.")
-
-        elif menu_choice == "📢 Notice Board":
-            st.subheader("📢 Publish Official Announcement")
-            n_stream = st.selectbox("Target Stream (or All):", ["All Students"] + list(COURSES_DATA.keys()))
-            n_msg = st.text_area("Announcement Message:")
-            if st.button("Broadcast Notice", use_container_width=True):
-                if n_msg:
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("INSERT INTO notices (course_stream, message, posted_at) VALUES (?, ?, ?)",
-                              (n_stream, n_msg, str(date.today())))
-                    conn.commit()
-                    conn.close()
-                    st.success("Notice broadcasted successfully!")
-
-    # ----------------- STUDENT INTERFACE -----------------
-    else:
-        st.markdown(f"""
-            <div class="main-header">
-                <h1>HM UMER CHOUDHARY STUDENT WORKSPACE</h1>
-                <p>Course Stream: {st.session_state.course_stream} | Roll Number: {st.session_state.username}</p>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if menu_choice == "📈 My Performance & Overview":
-            conn = sqlite3.connect(DB_FILE)
-            my_tests = pd.read_sql_query(
-                "SELECT t.title, r.score, r.total, r.submitted_at FROM student_test_results r JOIN mock_tests t ON r.test_id = t.id WHERE r.crn = ?",
-                conn, params=(st.session_state.username,)
-            )
-            my_att = pd.read_sql_query("SELECT COUNT(*) as c FROM student_attendance WHERE crn = ?", conn, params=(st.session_state.username,)).iloc[0]['c']
-            conn.close()
-
-            if not my_tests.empty:
-                tot_score = my_tests['score'].sum()
-                tot_max = my_tests['total'].sum()
-                overall_avg = round((tot_score / tot_max) * 100, 1)
-            else:
-                overall_avg = 0.0
 
             c1, c2, c3 = st.columns(3)
-            c1.markdown(f'<div class="metric-card"><h3>{overall_avg}%</h3><p>Cumulative Assessment Average</p></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="metric-card"><h3>{len(my_tests)}</h3><p>Tests Completed</p></div>', unsafe_allow_html=True)
-            c3.markdown(f'<div class="metric-card"><h3>{my_att}</h3><p>Classes Attended</p></div>', unsafe_allow_html=True)
+            c1.markdown(f'<div class="metric-card"><h3>{st_count}</h3><p>Enrolled Students</p></div>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="metric-card"><h3>{mat_count}</h3><p>Published Materials</p></div>', unsafe_allow_html=True)
+            c3.markdown(f'<div class="metric-card"><h3>{test_count}</h3><p>Active Tests</p></div>', unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
-            if not my_tests.empty:
-                st.subheader("📊 Test History & Progress")
-                my_tests['Percentage'] = (my_tests['score'] / my_tests['total']) * 100
-                st.bar_chart(my_tests.set_index('title')[['Percentage']], color="#1E3A8A")
-                st.dataframe(my_tests, use_container_width=True)
-            else:
-                st.info("You haven't attempted any tests yet. Head over to 'Take Timed Quiz / Test' to start practicing!")
-
-        elif menu_choice == "⏱️ Take Timed Quiz / Test":
-            st.subheader("⏱️ Timed Evaluation Tests (AI & Faculty Mock Tests)")
-            
+            st.subheader("Student Distribution by Course")
             conn = sqlite3.connect(DB_FILE)
-            avail_tests = pd.read_sql_query(
-                "SELECT id, subject, title, duration_minutes, total_marks FROM mock_tests WHERE course_stream = ?",
-                conn, params=(st.session_state.course_stream,)
-            )
+            dist = pd.read_sql_query("SELECT course_stream as 'Course', COUNT(*) as 'Students' FROM users WHERE role = 'Student' GROUP BY course_stream", conn)
             conn.close()
+            st.table(dist if not dist.empty else pd.DataFrame({"Course": COURSES, "Students": [0, 0, 0]}))
 
-            if not avail_tests.empty:
-                if not st.session_state.test_active and not st.session_state.test_submitted:
-                    chosen_t = st.selectbox("Select Test to Attempt:", [f"{r['id']} - {r['title']} ({r['subject']}) | Time: {r['duration_minutes']} Mins" for _, r in avail_tests.iterrows()])
-                    selected_tid = int(chosen_t.split(" - ")[0])
-                    
-                    if st.button("🚀 Start Timed Test", use_container_width=True):
-                        st.session_state.test_active = True
-                        st.session_state.current_test_id = selected_tid
-                        st.session_state.test_start_time = time.time()
-                        st.session_state.test_submitted = False
-                        st.rerun()
+        elif menu == "📤 Upload & Change Material":
+            st.subheader("📤 Teacher Upload & Manage Material")
+            st.caption("Upload relevant books, notes, slides, MCQs, tests, and solutions.")
 
-                elif st.session_state.test_active:
-                    tid = st.session_state.current_test_id
-                    conn = sqlite3.connect(DB_FILE)
-                    t_meta = pd.read_sql_query("SELECT title, subject, duration_minutes, total_marks FROM mock_tests WHERE id = ?", conn, params=(tid,)).iloc[0]
-                    questions = pd.read_sql_query("SELECT id, question, opt_a, opt_b, opt_c, opt_d FROM test_questions WHERE test_id = ?", conn, params=(tid,))
-                    conn.close()
+            with st.form("upload_mat_form"):
+                sel_course = st.selectbox("Target Course:", COURSES)
+                sel_type = st.selectbox("Content Category:", CONTENT_TYPES)
+                mat_title = st.text_input("Material Title (e.g., Chapter 1 Comprehensive Notes):")
+                mat_file = st.file_uploader("Select File (PDF, DOCX, PPTX):", type=["pdf", "docx", "pptx"])
+                btn_up = st.form_submit_button("Upload Material")
 
-                    elapsed_time = int(time.time() - st.session_state.test_start_time)
-                    total_seconds = t_meta['duration_minutes'] * 60
-                    remaining_seconds = max(0, total_seconds - elapsed_time)
-                    mins, secs = divmod(remaining_seconds, 60)
+                if btn_up and mat_title and mat_file:
+                    safe_name = f"[{sel_type}]_{mat_file.name}"
+                    save_path = os.path.join(UPLOAD_DIR, safe_name)
+                    with open(save_path, "wb") as f:
+                        f.write(mat_file.getbuffer())
 
-                    st.warning(f"⏳ **Time Remaining:** `{mins:02d}:{secs:02d}` | Total Duration: {t_meta['duration_minutes']} Minutes")
-
-                    if remaining_seconds == 0:
-                        st.error("⚠️ Time is up! Submitting your test automatically...")
-
-                    with st.form("exam_sheet"):
-                        user_answers = {}
-                        for idx, q in questions.iterrows():
-                            st.markdown(f"**Q{idx+1}: {q['question']}**")
-                            opts = [f"A) {q['opt_a']}", f"B) {q['opt_b']}", f"C) {q['opt_c']}", f"D) {q['opt_d']}"]
-                            user_answers[q['id']] = st.radio(f"Select your answer for Q{idx+1}:", opts, key=f"ans_{q['id']}")
-                            st.markdown("---")
-
-                        btn_submit_exam = st.form_submit_button("Submit Assessment Now")
-                        if btn_submit_exam or remaining_seconds == 0:
-                            conn = sqlite3.connect(DB_FILE)
-                            sol_df = pd.read_sql_query("SELECT id, correct_opt, exp_en, exp_ur FROM test_questions WHERE test_id = ?", conn, params=(tid,))
-                            
-                            score = 0
-                            total_q = len(sol_df)
-                            for _, s in sol_df.iterrows():
-                                selected = user_answers.get(s['id'], "")
-                                if selected.startswith(s['correct_opt']):
-                                    score += 1
-
-                            scaled_score = int((score / total_q) * t_meta['total_marks']) if total_q > 0 else 0
-                            
-                            c = conn.cursor()
-                            c.execute("INSERT INTO student_test_results (crn, test_id, score, total, submitted_at) VALUES (?, ?, ?, ?, ?)",
-                                      (st.session_state.username, tid, scaled_score, t_meta['total_marks'], str(datetime.now().strftime("%Y-%m-%d %H:%M"))))
-                            conn.commit()
-                            conn.close()
-
-                            st.session_state.test_active = False
-                            st.session_state.test_submitted = True
-                            st.session_state.last_submission = {
-                                "tid": tid,
-                                "score": scaled_score,
-                                "total": t_meta['total_marks'],
-                                "user_answers": user_answers
-                            }
-                            st.rerun()
-
-                elif st.session_state.test_submitted:
-                    sub = st.session_state.last_submission
-                    st.success(f"🎉 Test Finished! You Scored: **{sub['score']} / {sub['total']} Marks**")
-                    st.markdown("### 📖 Detailed Solutions & Explanations (English & اردو)")
-
-                    conn = sqlite3.connect(DB_FILE)
-                    sol_details = pd.read_sql_query("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_opt, exp_en, exp_ur FROM test_questions WHERE test_id = ?", conn, params=(sub['tid'],))
-                    conn.close()
-
-                    for idx, s in sol_details.iterrows():
-                        u_pick = sub['user_answers'].get(s['id'], "Not Answered")
-                        is_correct = u_pick.startswith(s['correct_opt'])
-                        badge = "✅ Correct" if is_correct else "❌ Incorrect"
-                        
-                        st.markdown(f"**Q{idx+1}: {s['question']}** ({badge})")
-                        st.write(f"Your Choice: `{u_pick}` | Correct Key: **Option {s['correct_opt']}**")
-                        
-                        st.markdown(f"""
-                            <div class="solution-box">
-                                <p><strong>💡 English Explanation:</strong> {s['exp_en'] if s['exp_en'] else 'Standard accounting principle applied.'}</p>
-                                <p><strong>اردو تشریح:</strong> {s['exp_ur'] if s['exp_ur'] else 'اس سوال کے مطابق مطلوبہ اصول لاگو ہوتا ہے۔'}</p>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        st.markdown("---")
-
-                    if st.button("Close and Return to Menu"):
-                        st.session_state.test_submitted = False
-                        st.session_state.last_submission = {}
-                        st.rerun()
-            else:
-                st.info(f"No mock tests are currently scheduled for **{st.session_state.course_stream}**.")
-
-        elif menu_choice == "📚 My Study Materials":
-            st.subheader(f"📚 Course Study Texts & Notes ({st.session_state.course_stream})")
-            conn = sqlite3.connect(DB_FILE)
-            materials = pd.read_sql_query("SELECT subject, title, file_path, uploaded_at FROM study_materials WHERE course_stream = ?",
-                                         conn, params=(st.session_state.course_stream,))
-            conn.close()
-
-            if not materials.empty:
-                for _, m in materials.iterrows():
-                    st.markdown(f"#### 📖 {m['title']}")
-                    st.caption(f"Subject: **{m['subject']}** | Uploaded: {m['uploaded_at']}")
-                    if os.path.exists(m['file_path']):
-                        with open(m['file_path'], "rb") as f_data:
-                            st.download_button(
-                                label="📥 Download Material",
-                                data=f_data,
-                                file_name=os.path.basename(m['file_path']),
-                                key=f"mat_{m['file_path']}"
-                            )
-                    st.markdown("---")
-            else:
-                st.info("No study notes or books uploaded for your course yet.")
-
-        elif menu_choice == "🎥 My Video Lectures":
-            st.subheader(f"🎥 Video Lectures Hub ({st.session_state.course_stream})")
-            conn = sqlite3.connect(DB_FILE)
-            videos = pd.read_sql_query("SELECT subject, title, video_url, added_at FROM video_lectures WHERE course_stream = ?",
-                                      conn, params=(st.session_state.course_stream,))
-            conn.close()
-
-            if not videos.empty:
-                for _, v in videos.iterrows():
-                    st.markdown(f"#### 🎬 {v['title']}")
-                    st.caption(f"Subject: **{v['subject']}** | Added Date: {v['added_at']}")
-                    st.video(v['video_url'])
-                    st.markdown("---")
-            else:
-                st.info("No video lectures published yet.")
-
-        elif menu_choice == "🛡️ Mark My Attendance":
-            st.subheader("🛡️ Mark Class Attendance")
-            with st.form("att_verify_box"):
-                st_pin = st.text_input("Enter 4-Digit Session PIN:", max_chars=4)
-                btn_mark_att = st.form_submit_button("Verify & Mark Present", use_container_width=True)
-
-                if btn_mark_att:
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
-                    c.execute("SELECT session_id, subject FROM attendance_sessions WHERE course_stream = ? AND pin = ? AND session_date = ? AND status = 'OPEN'",
-                              (st.session_state.course_stream, st_pin, str(date.today())))
-                    valid_sess = c.fetchone()
-
-                    if valid_sess:
-                        sess_id = valid_sess[0]
-                        c.execute("SELECT id FROM student_attendance WHERE session_id = ? AND crn = ?", (sess_id, st.session_state.username))
-                        already_marked = c.fetchone()
-                        
-                        if already_marked:
-                            st.warning("You have already marked your attendance for this session.")
-                        else:
-                            c.execute("INSERT INTO student_attendance (session_id, crn, marked_at) VALUES (?, ?, ?)",
-                                      (sess_id, st.session_state.username, str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))))
-                            conn.commit()
-                            st.success(f"Attendance verified! You are marked PRESENT for {valid_sess[1]}.")
-                    else:
-                        st.error("Invalid PIN or no active attendance session found for today.")
+                    c.execute("INSERT INTO portal_materials (course_stream, content_type, title, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?)",
+                              (sel_course, sel_type, mat_title, save_path, str(date.today())))
+                    conn.commit()
                     conn.close()
+                    st.success(f"{sel_type} '{mat_title}' uploaded for {sel_course}!")
 
-        elif menu_choice == "📄 Academic Report Card":
-            st.subheader("📄 Official Academic Transcript")
+            st.markdown("---")
+            st.subheader("Manage & Delete Existing Materials")
             conn = sqlite3.connect(DB_FILE)
-            st_tests = pd.read_sql_query(
-                "SELECT t.title as 'Assessment Title', r.score as 'Marks Obtained', r.total as 'Maximum Marks', r.submitted_at as 'Date Attempted' FROM student_test_results r JOIN mock_tests t ON r.test_id = t.id WHERE r.crn = ?",
-                conn, params=(st.session_state.username,)
-            )
-            my_att = pd.read_sql_query("SELECT COUNT(*) as c FROM student_attendance WHERE crn = ?", conn, params=(st.session_state.username,)).iloc[0]['c']
+            all_mats = pd.read_sql_query("SELECT id, course_stream, content_type, title, uploaded_at FROM portal_materials ORDER BY id DESC", conn)
             conn.close()
-
-            if not st_tests.empty:
-                tot_o = st_tests['Marks Obtained'].sum()
-                tot_m = st_tests['Maximum Marks'].sum()
-                agg_pct = round((tot_o / tot_m) * 100, 1)
+            if not all_mats.empty:
+                st.dataframe(all_mats, use_container_width=True)
+                del_id = st.number_input("Enter Material ID to remove:", min_value=1, step=1)
+                if st.button("Delete Selected Material"):
+                    conn = sqlite3.connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute("DELETE FROM portal_materials WHERE id = ?", (del_id,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Material #{del_id} removed successfully.")
+                    st.rerun()
             else:
-                agg_pct = 0.0
+                st.info("No materials published yet.")
 
-            out_rep = io.BytesIO()
-            with pd.ExcelWriter(out_rep, engine='openpyxl') as writer:
-                summary_data = {
-                    "Field": ["Student Name", "CRN", "Enrolled Stream", "Tests Attempted", "Aggregate Score", "Sessions Attended", "Transcript Date"],
-                    "Value": [st.session_state.full_name, st.session_state.username, st.session_state.course_stream, len(st_tests), f"{agg_pct}%", my_att, str(date.today())]
-                }
-                pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name="Student Summary")
-                if not st_tests.empty:
-                    st_tests.to_excel(writer, index=False, sheet_name="Test Results")
+        elif menu == "🤖 AI Book Quiz Generator":
+            st.subheader("🤖 Upload Book PDF & AI Self-Made Quiz Generator")
+            st.write("Upload any textbook PDF, set the page range, and let the AI generate a timed MCQ test with Urdu and English explanations.")
 
-            st.download_button(
-                label="📥 Download Official Report Card (Excel)",
-                data=out_rep.getvalue(),
-                file_name=f"ReportCard_{st.session_state.username}_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            st.table(st_tests)
+            with st.form("ai_book_quiz_form"):
+                col_a1, col_a2 = st.columns(2)
+                with col_a1:
+                    ai_c = st.selectbox("Select Target Course:", COURSES)
+                    ai_title = st.text_input("Quiz Title (e.g., IAS 16 Revaluation Test):")
+                with col_a2:
+                    pdf_input = st.file_uploader("Upload Book PDF:", type=["pdf"])
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    sp = col_p1.number_input("Start Page:", min_value=1, value=1)
+                    ep = col_p2.number_input("End Page:", min_value=1, value=5)
+                    nq = col_p3.number_input("No. of Questions:", min_value=1, max_value=25, value=5)
+
+                col_t1, col_t2 = st.columns(2)
+                t_timer = col_t1.number_input("Timer (Minutes):", min_value=5, max_value=180, value=15)
+                t_marks = col_t2.number_input("Total Marks:", min_value=5, max_value=100, value=15)
+
+                btn_gen = st.form_submit_button("⚡ AI Generate & Publish Timed Quiz", use_container_width=True)
+
+                if btn_gen:
+                    if not pdf_input or not ai_title:
+                        st.error("Please provide both the PDF file and Quiz Title.")
+                    elif sp > ep:
+                        st.error("Start Page cannot be greater than End Page.")
+                    else:
+                        with st.spinner("Extracting text and generating AI MCQs..."):
+                            extracted_txt, total_pages = extract_pdf_pages(pdf_input, int(sp), int(ep))
+                            if not extracted_txt:
+                                st.warning("No readable text found on those pages. Please ensure the PDF is text-based.")
+                            else:
+                                mcqs = generate_ai_mcqs(extracted_txt, int(nq), ai_title)
+                                conn = sqlite3.connect(DB_FILE)
+                                c = conn.cursor()
+                                c.execute("INSERT INTO mock_tests (course_stream, title, duration_minutes, total_marks, created_at) VALUES (?, ?, ?, ?, ?)",
+                                          (ai_c, f"[AI] {ai_title}", t_timer, t_marks, str(date.today())))
+                                new_tid = c.lastrowid
+                                for m in mcqs:
+                                    c.execute("INSERT INTO test_questions (test_id, question, opt_a, opt_b, opt_c, opt_d, correct_opt, exp_en, exp_ur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                              (new_tid, m['q'], m['a'], m['b'], m['c'], m['d'], m['correct'], m['exp_en'], m['exp_ur']))
+                                conn.commit()
+                                conn.close()
+                                st.success(f"Generated {len(mcqs)} questions for {ai_c} from pages {sp}-{ep}! Live for enrolled students.")
+
+        elif menu == "📢 Update Announcement":
+            st.subheader("📢 Update Top Status / Announcement")
+            with st.form("ann_form"):
+                new_msg = st.text_area("Write Announcement for Students:")
+                if st.form_submit_button("Update Status"):
+                    if new_msg:
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("INSERT INTO announcements (message, updated_at) VALUES (?, ?)", (new_msg, str(date.today())))
+                        conn.commit()
+                        conn.close()
+                        st.success("Announcement updated!")
+                        st
