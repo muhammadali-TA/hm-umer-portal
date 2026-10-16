@@ -447,4 +447,157 @@ else:
         elif menu == "📖 IFRS Revision Matrix":
             st.subheader("Key Accounting Standards Matrix")
             matrix_data = {
+                "Standard": ["IAS 1", "IAS 7", "IAS 16", "IAS 20", "IAS 23", "IAS 37"],
+                "Topic": ["Presentation of FS", "Cash Flows", "PPE", "Govt Grants", "Borrowing Costs", "Provisions"],
+                "Key Rule": ["Current vs Non-Current", "Operating/Investing/Financing", "Cost vs Revaluation", "Deferred Income Method", "Qualifying Assets only", "Reliable estimate & present obligation"]
+            }
+            st.table(pd.DataFrame(matrix_data))
+
+    # ----------------- STUDENT VIEWS -----------------
+    else:
+        crn = st.session_state.username
+        
+        conn = sqlite3.connect(DB_FILE)
+        st_info = pd.read_sql_query("SELECT name, level FROM students WHERE crn = ?", conn, params=(crn,))
+        st_level = st_info.iloc[0]['level'] if not st_info.empty else "N/A"
+        
+        marks_df = pd.read_sql_query(
+            "SELECT topic as 'Test', score as 'Obtained', total as 'Total', quiz_date as 'Date' FROM quiz_results WHERE crn = ? ORDER BY id ASC", 
+            conn, params=(crn,)
+        )
+        att_df = pd.read_sql_query("SELECT status FROM attendance WHERE crn = ?", conn, params=(crn,))
+        conn.close()
+
+        if not marks_df.empty:
+            total_obtained = marks_df['Obtained'].sum()
+            total_marks = marks_df['Total'].sum()
+            overall_pct = round((total_obtained / total_marks) * 100, 1)
+            marks_df['Percentage'] = (marks_df['Obtained'] / marks_df['Total']) * 100
+        else:
+            overall_pct = 0.0
+
+        if not att_df.empty:
+            present_count = len(att_df[att_df['status'] == 'Present'])
+            att_pct = round((present_count / len(att_df)) * 100, 1)
+        else:
+            att_pct = 0.0
+
+        if menu == "📈 Performance Dashboard & Charts":
+            st.subheader(f"📈 Performance Dashboard (CRN: {crn})")
+
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Overall Score", f"{overall_pct}%")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with col_s2:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Tests Completed", f"{len(marks_df)}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with col_s3:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Attendance Ratio", f"{att_pct}%")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            if not marks_df.empty:
+                st.markdown("#### 🎯 Overall Progress Bar")
+                bar_val = min(max(overall_pct / 100.0, 0.0), 1.0)
+                st.progress(bar_val, text=f"Overall Score: {overall_pct}%")
+
+                st.markdown("#### 📊 Test-wise Performance Trend")
+                marks_df['Test_Label'] = marks_df['Test'] + " (" + marks_df['Date'] + ")"
+                chart_df = marks_df.set_index('Test_Label')[['Percentage']]
+
+                col_c1, col_c2 = st.columns([2, 1])
+                with col_c1:
+                    st.bar_chart(chart_df, color="#1E3A8A")
+                with col_c2:
+                    disp_df = marks_df[['Test', 'Obtained', 'Total', 'Percentage', 'Date']].copy()
+                    disp_df['Percentage'] = disp_df['Percentage'].round(1).astype(str) + "%"
+                    st.dataframe(disp_df, use_container_width=True)
+            else:
+                st.info("Abhi tak aapka koi test record maujood nahi hai.")
+
+        elif menu == "📄 Download Official Report Card":
+            st.subheader("📄 Official Student Report Card")
+            col_down1, col_down2 = st.columns(2)
+
+            with col_down1:
+                st.markdown("#### 📗 Excel Report Card (.xlsx)")
+                excel_bytes = generate_excel_report(
+                    st.session_state.full_name, crn, st_level, marks_df, overall_pct, att_pct
+                )
+                st.download_button(
+                    label="📥 Download Excel Report Card",
+                    data=excel_bytes,
+                    file_name=f"ReportCard_{crn}_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            with col_down2:
+                st.markdown("#### 📕 PDF / Printable Card (.html / PDF)")
+                html_bytes = generate_html_report(
+                    st.session_state.full_name, crn, st_level, marks_df, overall_pct, att_pct
+                )
+                st.download_button(
+                    label="📥 Download Print / PDF Card",
+                    data=html_bytes,
+                    file_name=f"ReportCard_{crn}_{date.today()}.html",
+                    mime="text/html",
+                    use_container_width=True
+                )
+
+            st.markdown("---")
+            st.markdown("##### 🔍 Report Card Live Preview")
+            st.components.v1.html(html_bytes, height=450, scrolling=True)
+
+        elif menu == "📚 My Books & Notes":
+            st.subheader("📚 Available Books & Study Material")
+            files = [f for f in os.listdir(UPLOAD_DIR) if not f.startswith("[TEST]")]
+            if files:
+                for f in files:
+                    f_path = os.path.join(UPLOAD_DIR, f)
+                    st.markdown(f"📖 **{f}** `({round(os.path.getsize(f_path)/1024, 1)} KB)`")
+                    with open(f_path, "rb") as cur_f:
+                        st.download_button(label="Download Notes", data=cur_f, file_name=f, key=f"st_{f}")
+                    st.markdown("---")
+            else:
+                st.info("Abhi koi notes upload nahi kiye gaye.")
+
+        elif menu == "📝 Available Tests & Papers":
+            st.subheader("📝 Scheduled Tests & Mock Papers")
+            tests = [f for f in os.listdir(UPLOAD_DIR) if f.startswith("[TEST]")]
+            if tests:
+                for t in tests:
+                    t_path = os.path.join(UPLOAD_DIR, t)
+                    st.markdown(f"📝 **{t.replace('[TEST]', '').replace('.pdf', '')}**")
+                    with open(t_path, "rb") as cur_t:
+                        st.download_button(label="Download Paper", data=cur_t, file_name=t, key=f"tst_{t}")
+                    st.markdown("---")
+            else:
+                st.info("Koi naya test schedule nahi hai.")
+
+        elif menu == "🤖 Practice AI Quiz":
+            st.subheader("🤖 Self Assessment Quiz")
+            ans = st.radio("IAS 23 ke tehet capitalization kab suspend hoti hai?", [
+                "Jab active development ka kaam abnormal lambe arse ke liye suspend ho",
+                "Jab bank interest rate badha de",
+                "Jab annual audit start ho"
+            ])
+            if st.button("Check Answer"):
+                if ans == "Jab active development ka kaam abnormal lambe arse ke liye suspend ho":
+                    st.success("Durust jawab! (IAS 23 Rule)")
+                else:
+                    st.error("Ghalat jawab. Durust rule: Active development abnormal suspend hone par.")
+
+        elif menu == "📖 IFRS Revision Matrix":
+            st.subheader("Accounting Standards Quick Matrix")
+            matrix_data = {
                 "Standard": ["IAS 1", "IAS 7", "IAS 16", "IAS 20", "IAS 23"],
+                "Title": ["Presentation of FS", "Cash Flows", "Property, Plant & Equipment", "Government Grants", "Borrowing Costs"],
+                "Key Rules": ["Current vs Non-Current", "Operating vs Investing vs Financing", "Cost vs Revaluation Model", "Deferred Income Method", "Qualifying Asset Capitalization"]
+            }
+            st.table(pd.DataFrame(matrix_data))
