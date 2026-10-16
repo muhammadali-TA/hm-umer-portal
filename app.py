@@ -83,7 +83,7 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 TEACHER_KEY = "HMUMER786"
-DB_FILE = "hm_umer_portal_v2.db"
+DB_FILE = "hm_umer_portal_v3.db"
 UPLOAD_DIR = "academy_content"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -123,9 +123,14 @@ def init_db():
         title TEXT,
         duration_minutes INTEGER,
         total_marks INTEGER,
-        status TEXT,
+        status TEXT DEFAULT 'PUBLISHED',
         created_at TEXT
     )''')
+    
+    c.execute("PRAGMA table_info(mock_tests)")
+    cols = [col[1] for col in c.fetchall()]
+    if "status" not in cols:
+        c.execute("ALTER TABLE mock_tests ADD COLUMN status TEXT DEFAULT 'PUBLISHED'")
     
     c.execute('''CREATE TABLE IF NOT EXISTS test_questions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -481,41 +486,3 @@ if not st.session_state.logged_in:
                             conn.close()
                         else:
                             c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                                      (s_crn, hash_password(s_pwd1), s_name, "Student", s_course, ""))
-                            conn.commit()
-                            conn.close()
-                            st.success("Registration complete! You can now Sign In.")
-
-        elif auth_action == "Teacher Sign Up":
-            st.markdown("### 👨‍🏫 Teacher Registration")
-            st.caption("🔒 Protected by Teacher Security Key.")
-            with st.form("t_signup"):
-                t_sec = st.text_input("Teacher Authorization Key:", type="password")
-                t_user = st.text_input("Preferred Username:")
-                t_name = st.text_input("Full Name:", value="HM Umer Choudhary")
-                t_pwd1 = st.text_input("Create Password (Min 8 characters):", type="password")
-                t_pwd2 = st.text_input("Confirm Password:", type="password")
-                btn_t_reg = st.form_submit_button("Create Teacher Account", use_container_width=True)
-
-                if btn_t_reg:
-                    if t_sec != TEACHER_KEY:
-                        st.error("Unauthorized: Invalid Teacher Authorization Key.")
-                    elif len(t_pwd1) < 8:
-                        st.error("Security Violation: Password must be at least 8 characters.")
-                    elif t_pwd1 != t_pwd2:
-                        st.error("Passwords do not match.")
-                    else:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("SELECT username FROM users WHERE username = ?", (t_user,))
-                        if c.fetchone():
-                            st.error("Username already taken.")
-                            conn.close()
-                        else:
-                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                                      (t_user, hash_password(t_pwd1), t_name, "Teacher", "All", ""))
-                            conn.commit()
-                            conn.close()
-                            st.success("Teacher account created! Please Sign In.")
-
-# ----------------- AUTHENTICATED
