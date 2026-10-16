@@ -42,6 +42,8 @@ st.markdown("""
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
+TEACHER_ACCESS_KEY = "HMUMER786"
+
 # ----------------- REPORT GENERATION UTILITIES -----------------
 def generate_excel_report(student_name, crn, level, marks_df, overall_pct, att_pct):
     output = io.BytesIO()
@@ -228,12 +230,12 @@ if not st.session_state.logged_in:
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        auth_action = st.radio("Chunein:", ["Login", "Student Sign Up"], horizontal=True)
+        auth_action = st.radio("Chunein:", ["Login", "Teacher Sign Up", "Student Sign Up"], horizontal=True)
 
         if auth_action == "Login":
             st.markdown("### 🔐 Login Portal")
             with st.form("login_form"):
-                uname = st.text_input("Username / CRN:")
+                uname = st.text_input("Username / ID:")
                 pwd = st.text_input("Password:", type="password")
                 submit_login = st.form_submit_button("Log In")
 
@@ -254,7 +256,37 @@ if not st.session_state.logged_in:
                         st.rerun()
                     else:
                         st.error("Galat username ya password darj kiya gaya hai.")
-            st.info("💡 Default Teacher Account: `admin` | Password: `admin123`")
+            st.info("💡 Default Teacher Login: `admin` | Password: `admin123`")
+
+        elif auth_action == "Teacher Sign Up":
+            st.markdown("### 👨‍🏫 Teacher Registration (HM Umer Choudhary)")
+            with st.form("teacher_signup_form"):
+                t_key = st.text_input("Teacher Security Key (Secret):", type="password")
+                t_uname = st.text_input("Teacher Username (e.g. hmumer):")
+                t_name = st.text_input("Mukammal Naam:", value="HM Umer Choudhary")
+                t_pwd = st.text_input("Naya Password banayein:", type="password")
+                t_pwd_confirm = st.text_input("Password Confirm karein:", type="password")
+                submit_t_reg = st.form_submit_button("Create Teacher Account")
+
+                if submit_t_reg:
+                    if t_key != TEACHER_ACCESS_KEY:
+                        st.error("Ghalat Teacher Security Key! Sirf authorized teachers register ho sakte hain.")
+                    elif not t_uname or not t_name or not t_pwd:
+                        st.warning("Tamam khane pur karna lazmi hain.")
+                    elif t_pwd != t_pwd_confirm:
+                        st.error("Passwords aapas mein match nahi kar rahe.")
+                    else:
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("SELECT username FROM users WHERE username = ?", (t_uname,))
+                        if c.fetchone():
+                            st.error("Ye Username pehle se maujood hai. Koi doosra username chunein.")
+                            conn.close()
+                        else:
+                            c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (t_uname, hash_password(t_pwd), t_name, "Teacher"))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"Teacher account kamyabi se ban gaya! Ab 'Login' tab par ja kar username '{t_uname}' se login karein.")
 
         else:
             st.markdown("### 📝 Student Sign Up")
@@ -591,7 +623,7 @@ else:
                 if ans == "Jab active development ka kaam abnormal lambe arse ke liye suspend ho":
                     st.success("Durust jawab! (IAS 23 Rule)")
                 else:
-                    st.error("Ghalat jawab. Durust rule: Active development abnormal suspend hone par.")
+                    st.error("Ghalat جواب. Durust rule: Active development abnormal suspend hone par.")
 
         elif menu == "📖 IFRS Revision Matrix":
             st.subheader("Accounting Standards Quick Matrix")
