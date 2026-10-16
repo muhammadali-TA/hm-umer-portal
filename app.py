@@ -447,4 +447,4 @@ else:
         elif menu == "📖 IFRS Revision Matrix":
             st.subheader("Key Accounting Standards Matrix")
             matrix_data = {
-                "Standard": ["IAS 1", "IAS 7", "IAS 16", "IAS 20", "IAS
+                "Standard": ["IAS 1", "IAS 7", "IAS 16", "IAS 20", "IAS],
